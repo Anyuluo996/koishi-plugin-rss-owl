@@ -1,5 +1,5 @@
 {
-  "name": "koishi-plugin-rss-owl",
+  "name": "koishi-plugin-rss",
   "description": "",
   "version": "4.8.1",
   "main": "lib/index.js",
@@ -7,7 +7,7 @@
   "contributors": [],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/borraken/koishi-plugin-rss-owl.git"
+    "url": "git+https://github.com/Anyuluo996/koishi-plugin-rss-owl.git"
   },
   "files": [
     "lib"
@@ -27,9 +27,14 @@
     "koishi": "^4.17.11"
   },
   "dependencies": {
+    "@koishijs/censor": "^1.1.0",
     "axios": "^1.7.3",
     "cheerio": "^1.0.0-rc.12",
+    "https-proxy-agent": "^7.0.6",
     "koishi-plugin-puppeteer": "^3.8.4",
     "x2js": "^3.4.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

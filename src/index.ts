@@ -1,5 +1,6 @@
 import { Context, Session, Logger, Schema, MessageEncoder, h, $, clone } from 'koishi'
 import axios from 'axios'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import * as cheerio from 'cheerio';
 import { } from 'koishi-plugin-puppeteer'
 import { } from '@koishijs/censor'
@@ -126,7 +127,43 @@ export interface rssArg {
 
   nextUpdataTime?: number
 }
-// export const usage = ``
+export const usage = `
+RSS-OWL 订阅器使用说明
+
+基本命令:
+  rsso <url>              - 订阅RSS链接
+  rsso -l                 - 查看订阅列表
+  rsso -l [id]            - 查看订阅详情
+  rsso -r <content>       - 删除订阅(需要权限)
+  rsso -T <url>           - 测试订阅
+
+常用选项:
+  -i <template>          - 设置消息模板
+      可选值: content(文字) | default(图片) | custom(自定义) | only text | only media 等
+  -t <title>             - 自定义订阅标题
+  -a <arg>               - 自定义配置 (格式: key:value,key2:value2)
+      例如: -a timeout:30,merge:true
+
+高级选项:
+  -f <content>           - 关注订阅，更新时提醒
+  -fAll <content>        - 全体关注(需要高级权限)
+  -target <groupId>      - 跨群订阅(需要高级权限)
+  -d <time>              - 定时推送 (格式: "HH:mm/数量" 或 "HH:mm")
+      例如: -d "08:00/5" 表示每天8点推送5条
+  -p <id>                - 手动拉取最新内容
+
+快速订阅:
+  rsso -q                - 查看快速订阅列表
+  rsso -q [编号]         - 查看快速订阅详情
+  rsso -T tg:channel_name  - 快速订阅Telegram频道
+
+配置示例:
+  rsso -T -i content "https://example.com/rss"
+  rsso "https://example.com/rss" -t "我的订阅" -a "timeout:60,merge:true"
+  rsso -d "09:00/3" "https://example.com/rss"
+
+更多信息请访问: https://github.com/borraken/koishi-plugin-rss-owl
+`
 const templateList = ['auto','content', 'only text', 'only media','only image', 'only video', 'proto', 'default', 'only description', 'custom','link']
 
 export const Config = Schema.object({
@@ -240,12 +277,34 @@ export function apply(ctx: Context, config: Config) {
     if(name)logger.info(`${type}:<<${name}>>`)
     logger.info(message)
   }
+
+  // 安全的时间解析函数，处理各种格式
+  const parsePubDate = (pubDate: any): Date => {
+    if (!pubDate) return new Date(0)
+    try {
+      const date = new Date(pubDate)
+      // 检查是否为有效日期
+      if (isNaN(date.getTime())) {
+        debug(`无效的日期格式: ${pubDate}`, 'date parse', 'error')
+        return new Date(0)
+      }
+      return date
+    } catch (error) {
+      debug(`日期解析错误: ${pubDate}, ${error}`, 'date parse', 'error')
+      return new Date(0)
+    }
+  }
   const getImageUrl = async (url, arg,useBase64Mode=false) => {
     debug('imgUrl:'+url,'','details')
     if(!url)return ''
     let res
-    res = await $http(url, arg, { responseType: 'arraybuffer' })
-    debug(res.data,'img response','details')
+    try {
+      res = await $http(url, arg, { responseType: 'arraybuffer', timeout: 30000 })
+      debug(res.data,'img response','details')
+    } catch (error) {
+      debug(`图片请求失败: ${error}`, 'img error', 'error')
+      return ''
+    }
     let prefixList = ['png', 'jpeg', 'webp']
     let prefix = res.headers["content-type"] || ('image/' + (prefixList.find(i => new RegExp(i).test(url)) || 'jpeg'))
     let base64Prefix = `data:${prefix};base64,`
@@ -256,8 +315,6 @@ export function apply(ctx: Context, config: Config) {
       let fileUrl = await writeCacheFile(base64Data)
       return fileUrl
     }
-    // let res = await $http(url,arg,{responseType: 'blob'})
-    // let file = new File([res.data], "name");
   }
   const getVideoUrl = async (url, arg,useBase64Mode=false,dom) => {
     let src = dom.attribs.src || dom.children["0"].attribs.src
@@ -265,8 +322,13 @@ export function apply(ctx: Context, config: Config) {
     if(config.basic.videoMode == "href"){
       return src
     }else{
-      res = await $http(src, {...arg,timeout:0}, { responseType: 'arraybuffer' })
-      let prefix = res.headers["content-type"] 
+      try {
+        res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 0 })
+      } catch (error) {
+        debug(`视频请求失败: ${error}`, 'video error', 'error')
+        return ''
+      }
+      let prefix = res.headers["content-type"]
       let base64Prefix = `data:${prefix};base64,`
       let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
       if (config.basic.videoMode == 'base64') {
@@ -423,34 +485,34 @@ export function apply(ctx: Context, config: Config) {
   // 修改 $http 函数
   const $http = async (url, arg, config = {}) => {
     const makeRequest = async () => {
-      let requestConfig = { timeout: (arg.timeout || 0) * 1000 }
-      let proxy = {}
+      let requestConfig: any = {
+        timeout: (arg.timeout || 0) * 1000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      }
+
       if (arg?.proxyAgent?.enabled) {
-        proxy['proxy'] = {
-          "protocol": arg.proxyAgent.protocol,
-          "host": arg.proxyAgent.host,
-          "port": arg.proxyAgent.port
-        }
-        if (arg?.proxyAgent?.auth?.enabled) {
-          proxy['proxy']["auth"] = {
-            username: arg.proxyAgent.auth.username,
-            password: arg.proxyAgent.auth.password
-          }
-        }
+        const proxyUrl = `${arg.proxyAgent.protocol}://${arg.proxyAgent.host}:${arg.proxyAgent.port}`
+        const agent = new HttpsProxyAgent(proxyUrl)
+
+        requestConfig.httpsAgent = agent
+        requestConfig.proxy = false  // 禁用 axios 原生 proxy
+        debug(`使用代理: ${proxyUrl}`, 'proxy', 'info')
       }
+
       if (arg.userAgent) {
-        requestConfig['header'] = { 'User-Agent': arg.userAgent }
+        requestConfig.headers['User-Agent'] = arg.userAgent
       }
-      
-      debug(`${url} : ${JSON.stringify({ ...requestConfig, ...config, ...proxy })}`, 'request info', 'details')
-      
+
+      debug(`${url} : ${JSON.stringify({ ...requestConfig, ...config })}`, 'request info', 'details')
+
       let retries = 3
       while (retries > 0) {
         try {
           return await axios.get(url, {
             ...requestConfig,
-            ...config,
-            ...(retries % 2 ? proxy : {})
+            ...config
           })
         } catch (error) {
           retries--
@@ -776,7 +838,7 @@ export function apply(ctx: Context, config: Config) {
           let rssItemList = (await Promise.all(rssItem.url.split("|")
             .map(i=>parseQuickUrl(i))
             .map(async url => await getRssData(url, arg)))).flat(1)
-          let itemArray = rssItemList.sort((a, b) => +new Date(b.pubDate) - +new Date(a.pubDate))
+          let itemArray = rssItemList.sort((a, b) => parsePubDate(b.pubDate).getTime() - parsePubDate(a.pubDate).getTime())
             .filter(item => !arg.filter?.some(keyword => {
               let isFilter = new RegExp(keyword, 'im').test(item.title) || new RegExp(keyword, 'im').test(item.description)
               if(isFilter){
@@ -788,7 +850,7 @@ export function apply(ctx: Context, config: Config) {
           
           let lastContent = {itemArray:config.basic.resendUpdataContent==='all'?itemArray.map(getLastContent):config.basic.resendUpdataContent==='latest'? [getLastContent(itemArray[0])] :[]}
           
-          let lastPubDate = new Date(itemArray[0].pubDate) || new Date(0)
+          let lastPubDate = parsePubDate(itemArray[0].pubDate)
           if (arg.reverse) {
             itemArray = itemArray.reverse()
           }
@@ -801,16 +863,22 @@ export function apply(ctx: Context, config: Config) {
             debug(rssItemArray.map(i => i.title),'','info');
             messageList = await Promise.all(itemArray.filter((v, i) => i < arg.forceLength).map(async i => await parseRssItem(i, {...rssItem,...arg}, rssItem.author)))
           } else {
-            rssItemArray = itemArray.filter((v, i) => (+new Date(v.pubDate) > rssItem.lastPubDate)||rssItem.lastContent?.itemArray?.some(oldRssItem=>{
-              if(config.basic.resendUpdataContent==='disable')return false
-              let newItem = getLastContent(v)
-              let isSame = newItem.guid?newItem.guid===oldRssItem.guid:(newItem.link===oldRssItem.link&&newItem.title===oldRssItem.title)
-              // let newItem = lastContent.itemArray.find(i=>i.guid?(i.guid==oldRssItem.guid):(i.link==oldRssItem.link&&i.title==oldRssItem.title))
-              if(!isSame)return false
-              debug(JSON.stringify(oldRssItem.description),'oldRssItem','details')
-              debug(JSON.stringify(newItem.description),'newItem','details')
-              return JSON.stringify(oldRssItem.description)!==JSON.stringify(newItem.description)
-            })).filter((v, i) => !arg.maxRssItem || i < arg.maxRssItem)
+            rssItemArray = itemArray.filter((v, i) => {
+              const currentPubDate = parsePubDate(v.pubDate).getTime()
+              const lastPubDate = rssItem.lastPubDate?.getTime?.() || new Date(rssItem.lastPubDate).getTime()
+              // 使用 >= 替代 >，并添加5秒容错窗口防止时间精度问题
+              const isNewContent = currentPubDate >= (lastPubDate - 5000)
+              return isNewContent || rssItem.lastContent?.itemArray?.some(oldRssItem=>{
+                if(config.basic.resendUpdataContent==='disable')return false
+                let newItem = getLastContent(v)
+                let isSame = newItem.guid?newItem.guid===oldRssItem.guid:(newItem.link===oldRssItem.link&&newItem.title===oldRssItem.title)
+                // let newItem = lastContent.itemArray.find(i=>i.guid?(i.guid==oldRssItem.guid):(i.link==oldRssItem.link&&i.title==oldRssItem.title))
+                if(!isSame)return false
+                debug(JSON.stringify(oldRssItem.description),'oldRssItem','details')
+                debug(JSON.stringify(newItem.description),'newItem','details')
+                return JSON.stringify(oldRssItem.description)!==JSON.stringify(newItem.description)
+              })
+            }).filter((v, i) => !arg.maxRssItem || i < arg.maxRssItem)
             if (!rssItemArray.length) continue
             debug(`${JSON.stringify(rssItem)}:共${rssItemArray.length}条新信息`,'','info');
             debug(rssItemArray.map(i => i.title),'','info');
@@ -896,9 +964,12 @@ export function apply(ctx: Context, config: Config) {
       if (json.proxyAgent == 'false' || json.proxyAgent == 'none' || json.proxyAgent === '') {
         json.proxyAgent = { enabled: false }
       } else {
-        let protocol = json.proxyAgent.match(/^(http|https|socks5)(?=\/\/)/)
-        let host = json.proxyAgent.match(/(?<=:\/\/)(.+?)(?=\/)/)
-        let port = +json.proxyAgent.match(/(?<=\/)(\d{1,5})$/)
+        let protocolMatch = json.proxyAgent.match(/^(http|https|socks5)/)
+        let protocol = protocolMatch ? protocolMatch[1] : 'http'
+        let hostMatch = json.proxyAgent.match(/:\/\/([^:\/]+)/)
+        let host = hostMatch ? hostMatch[1] : ''
+        let portMatch = json.proxyAgent.match(/:(\d+)/)
+        let port = portMatch ? parseInt(portMatch[1]) : 7890
         let proxyAgent = { enabled: true, protocol, host, port }
         json.proxyAgent = proxyAgent
         if (json.auth) {
@@ -918,7 +989,18 @@ export function apply(ctx: Context, config: Config) {
     filter:[...config.msg.keywordFilter,...(arg?.filter||[])],
     block:[...config.msg.keywordBlock,...(arg?.block||[])],
     template: arg.template ?? config.basic.defaultTemplate,
-    proxyAgent: arg?.proxyAgent ? (arg.proxyAgent?.enabled ? (arg.proxyAgent?.host?arg.proxyAgent:{ ...config.net.proxyAgent, auth: config.net.proxyAgent.auth.enabled ? config.net.proxyAgent.auth : {} }) : { enabled: false }) : config.net.proxyAgent.enabled ? { ...config.net.proxyAgent, auth: config.net.proxyAgent.auth.enabled ? config.net.proxyAgent.auth : {} } : {}
+    proxyAgent: arg?.proxyAgent ? (
+      arg.proxyAgent?.enabled ? (
+        arg.proxyAgent?.host ? arg.proxyAgent :
+        {
+          ...config.net.proxyAgent,
+          auth: config.net.proxyAgent?.auth?.enabled ? config.net.proxyAgent.auth : undefined
+        }
+      ) : { enabled: false }
+    ) : (config.net.proxyAgent?.enabled ? {
+      ...config.net.proxyAgent,
+      auth: config.net.proxyAgent?.auth?.enabled ? config.net.proxyAgent.auth : undefined
+    } : {})
   })
   ctx.on('ready', async () => {
     // await ctx.broadcast([`sandbox:rdbvu1xb9nn:#`], '123')
@@ -939,7 +1021,7 @@ export function apply(ctx: Context, config: Config) {
   ctx.guild()
     .command('rssowl <url:text>', '*订阅 RSS 链接*')
     .alias('rsso')
-    .usage('https://github.com/borraken/koishi-plugin-rss-owl')
+    .usage(usage)
     .option('list', '-l [content] 查看订阅列表(详情)')
     .option('remove', '-r <content> [订阅id|关键字] *删除订阅*')
     .option('removeAll', '*删除全部订阅*')
@@ -1085,7 +1167,7 @@ export function apply(ctx: Context, config: Config) {
           .map(i=>parseQuickUrl(i))
           .map(async url => await getRssData(url, arg)))
         let itemArray = rssItemList.flat(1)
-          .sort((a, b) => +new Date(b.pubDate) - +new Date(a.pubDate))
+          .sort((a, b) => parsePubDate(b.pubDate).getTime() - parsePubDate(a.pubDate).getTime())
         debug(itemArray,'itemArray','info');
         let rssItemArray = itemArray.filter((v, i) => arg.forceLength ? (i < arg.forceLength) : (i < 1)).filter((v, i) => arg.maxRssItem ? (i < arg.maxRssItem) : true)
         debug(rssItemArray,"rssItemArray",'info');
@@ -1141,7 +1223,7 @@ export function apply(ctx: Context, config: Config) {
           }
           let itemArray = rssItemList
             .flat(1)
-            .sort((a, b) => +new Date(b.pubDate) - +new Date(a.pubDate))
+            .sort((a, b) => parsePubDate(b.pubDate).getTime() - parsePubDate(a.pubDate).getTime())
           let rssItemArray = itemArray.filter((v, i) => arg.forceLength ? (i < arg.forceLength) : (i < 1)).filter((v, i) => arg.maxRssItem ? (i < arg.maxRssItem) : true)
           let messageList
           try {
@@ -1179,7 +1261,7 @@ export function apply(ctx: Context, config: Config) {
         }else{
           rssItemList = await Promise.all(urlList.map(async url => await getRssData(url, arg)))
         }
-        let itemArray = rssItemList.flat(1).sort((a, b) => +new Date(b.pubDate) - +new Date(a.pubDate))
+        let itemArray = rssItemList.flat(1).sort((a, b) => parsePubDate(b.pubDate).getTime() - parsePubDate(a.pubDate).getTime())
         .filter((v, i) => arg.forceLength ? (i < arg.forceLength) : (i < 1))
         .filter((v, i) => arg.maxRssItem ? (i < arg.maxRssItem) : true)
         if(urlList.length === 1)subscribe.title = subscribe.title || itemArray[0].rss.channel.title
@@ -1189,7 +1271,7 @@ export function apply(ctx: Context, config: Config) {
         }
         
         subscribe.rssId =  (+(await ctx.database.get(('rssOwl' as any), { platform, guildId })).slice(-1)?.[0]?.rssId || 0) + 1
-        subscribe.lastPubDate =  new Date(item.pubDate) || subscribe.lastPubDate
+        subscribe.lastPubDate =  parsePubDate(item.pubDate)
         
         subscribe.lastContent = {itemArray:config.basic.resendUpdataContent==='all'?rssItemList.flat(1).map(getLastContent):config.basic.resendUpdataContent==='latest'? [getLastContent(itemArray[0])] :[]}
         itemArray = arg.forceLength?itemArray:[itemArray[0]]
