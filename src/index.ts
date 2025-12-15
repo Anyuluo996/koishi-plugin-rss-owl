@@ -8,7 +8,7 @@ import { } from '@koishijs/censor'
 const X2JS = require("x2js")
 const x2js = new X2JS()
 const logger = new Logger('rss-owl')
-export const name = 'RSS-OWL'
+export const name = '@anyul/koishi-plugin-rss'
 import { pathToFileURL } from 'url'
 import * as fs from 'fs';
 import * as path from 'path';

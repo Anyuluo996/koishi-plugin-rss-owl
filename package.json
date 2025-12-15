@@ -1,9 +1,10 @@
 {
-  "name": "koishi-plugin-rss",
-  "description": "",
-  "version": "4.8.1",
+  "name": "@anyul/koishi-plugin-rss",
+  "description": "Koishi RSS订阅器，支持多种RSS源和代理配置",
+  "version": "4.8.12",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
+  "author": "Anyuluo <anyul@email.com>",
   "contributors": [],
   "repository": {
     "type": "git",
@@ -21,7 +22,11 @@
   "keywords": [
     "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "rss",
+    "rss-owl",
+    "订阅器",
+    "news"
   ],
   "peerDependencies": {
     "koishi": "^4.17.11"
