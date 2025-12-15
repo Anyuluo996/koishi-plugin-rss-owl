@@ -652,159 +652,157 @@ export function apply(ctx: Context, config: Config) {
     }
   }
   const parseRssItem = async (item: any, arg: rssArg, authorId: string | number) => {
-    debug(arg,'rss arg','details');
-    // let messageItem = Object.assign({}, ...arg.rssItem.map(key => ({ [key]: item[key.split(":")[0]] ?? "" })))
-    let template = arg.template
-    let msg: string = ""
-    let html
-    let videoList = []
-    item.description = item.description?.join?.('') || item.description
+    debug(arg, 'rss arg', 'details');
+    let template = arg.template;
+    let msg = "";
+    let html;
+    let videoList = [];
+    item.description = item.description?.join?.('') || item.description;
+
     //block
-    arg.block?.forEach(blockWord =>{
-      item.description = item.description.replace(new RegExp(blockWord, 'gim'), i => Array(i.length).fill(config.msg.blockString).join(""))
-      item.title = item.title.replace(new RegExp(blockWord, 'gim'), i => Array(i.length).fill(config.msg.blockString).join(""))
-    })
-    // const pushVideo = (msg, html) => `${msg}${config.basic.videoFetch ? html('video').map((v, i) => i.attribs.src).map(i => `<video src="${i}"/>`).join() : ''}`
-    debug(template,'template');
-    // const toString = (obj)=>typeof obj === 'object' ? JSON.stringify(obj) : obj
-    const parseContent = (template,item)=>template.replace(/{{(.+?)}}/g, i =>i.match(/^{{(.*)}}$/)[1].split("|").reduce((t,v)=>t||v.match(/^'(.*)'$/)?.[1]||v.split(".").reduce((t, v) => new RegExp("Date").test(v) ? new Date(t?.[v]).toLocaleString('zh-CN') : t?.[v] || "", item),''))
-    if(config.basic.videoMode==='filter'){
-      html = cheerio.load(item.description)
-      if(html('video').length > 0) return ''
+    arg.block?.forEach(blockWord => {
+      item.description = item.description.replace(new RegExp(blockWord, 'gim'), i => Array(i.length).fill(config.msg.blockString).join(""));
+      item.title = item.title.replace(new RegExp(blockWord, 'gim'), i => Array(i.length).fill(config.msg.blockString).join(""));
+    });
+
+    debug(template, 'template');
+    // 通用内容解析
+    const parseContent = (template: string, item: any) => template.replace(/{{(.+?)}}/g, (i: string) => i.match(/^{{(.*)}}$/)[1].split("|").reduce((t: any, v: string) => t || v.match(/^'(.*)'$/)?.[1] || v.split(".").reduce((t: any, v: string) => new RegExp("Date").test(v) ? new Date(t?.[v]).toLocaleString('zh-CN') : t?.[v] || "", item), ''));
+
+    if (config.basic.videoMode === 'filter') {
+      html = cheerio.load(item.description);
+      if (html('video').length > 0) return '';
     }
-    html = cheerio.load(item.description)
-    if(template=='auto'){
-      let stringLength = html.text().length
-      template = stringLength<300?'content':'custom'
+
+    html = cheerio.load(item.description);
+    if (template == 'auto') {
+      let stringLength = html.text().length;
+      template = stringLength < 300 ? 'content' : 'custom';
     }
+
     if (template == "custom") {
-      // description = config.template.custom.replace(/{{(.+?)}}/g, i =>i.match(/^{{(.*)}}$/)[1].split(".").reduce((t, v) => new RegExp("Date").test(v) ? new Date(t?.[v]).toLocaleString('zh-CN') : t?.[v] || "", item))
-      item.description = parseContent(config.template.custom,{...item,arg})
-      debug(item.description,'description');
-      html = cheerio.load(item.description)
-      if(arg?.proxyAgent?.enabled){
-        await Promise.all(html('img').map(async(v,i)=>i.attribs.src = await getImageUrl(i.attribs.src,arg,true) )) 
+      item.description = parseContent(config.template.custom, { ...item, arg });
+      debug(item.description, 'description');
+      html = cheerio.load(item.description);
+      if (arg?.proxyAgent?.enabled) {
+        await Promise.all(html('img').map(async (v: any, i: any) => i.attribs.src = await getImageUrl(i.attribs.src, arg, true)));
       }
-      html('img').attr('style', 'object-fit:scale-down;max-width:100%;')
-      if(config.basic.imageMode=='base64'){
-        msg = (await renderHtml2Image(html.html())).toString()
-      }else if(config.basic.imageMode=='File'){
-        msg = await ctx.puppeteer.render(html.html())
-        msg = await puppeteerToFile(msg)
+      html('img').attr('style', 'object-fit:scale-down;max-width:100%;');
+      if (config.basic.imageMode == 'base64') {
+        msg = (await renderHtml2Image(html.html())).toString();
+      } else if (config.basic.imageMode == 'File') {
+        msg = await ctx.puppeteer.render(html.html());
+        msg = await puppeteerToFile(msg);
       }
-      msg = parseContent(config.template.customRemark,{...item,arg,description:msg})
+      msg = parseContent(config.template.customRemark, { ...item, arg, description: msg });
+      await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
+      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+    }
+    else if (template == "content") {
+      html = cheerio.load(item.description);
+      let imgList: string[] = [];
+      html('img').map((key: any, i: any) => imgList.push(i.attribs.src));
+      imgList = [...new Set(imgList)];
+      let imgBufferList = Object.assign({}, ...(await Promise.all(imgList.map(async (src: string) => ({ [src]: await getImageUrl(src, arg) })))));
+      html('img').replaceWith((key: any, Dom: any) => `<p>$img{{${imgList[key]}}}</p>`);
+      msg = html.text();
+      item.description = msg.replace(/\$img\{\{(.*?)\}\}/g, (match: string) => {
+        let src = match.match(/\$img\{\{(.*?)\}\}/)[1];
+        return `<img src="${imgBufferList[src]}"/>`;
+      });
+      msg = parseContent(config.template.content, { ...item, arg });
 
-      await Promise.all(html('video').map(async(v,i)=>videoList.push([await getVideoUrl(i.attribs.src,arg,true,i),(i.attribs.poster&&config.basic.usePoster)?await getImageUrl(i.attribs.poster,arg,true):""])))
-      msg += videoList.map(([src,poster])=>h('video',{src,poster})).join("")
-      
-    } else if (template == "content") {
-      html = cheerio.load(item.description)
-      let imgList = []
-      html('img').map((key, i) => imgList.push(i.attribs.src))
-      imgList = [...new Set(imgList)]
-      let imgBufferList = Object.assign({}, ...(await Promise.all(imgList.map(async src => ({ [src]: await getImageUrl(src, arg) })))))
-      // imgList = await Promise.all(imgList.map(async ([key,i])=>({[key]:await getImageUrl(i, arg)}))) 
-      html('img').replaceWith((key, Dom) => `<p>$img{{${imgList[key]}}}</p>`)
-      msg = html.text()
-      item.description = msg.replace(/\$img\{\{(.*?)\}\}/g, match => {
-        let src = match.match(/\$img\{\{(.*?)\}\}/)[1]
-        return `<img src="${imgBufferList[src]}"/>`
-      })
-      msg = parseContent(config.template.content,{...item,arg})
-      logger.info(msg)
-      // msg = `${item?.title?`《${item?.title}》\n`:''}${msg}`
-      // await Promise.all(html('video').map(async(v,i)=>videoList.push(await getVideoUrl(i.attribs.src,arg,true,i))))
-      // msg += videoList.map(src=>h.video(src)).join("")
-      
-      await Promise.all(html('video').map(async(v,i)=>videoList.push([await getVideoUrl(i.attribs.src,arg,true,i),(i.attribs.poster&&config.basic.usePoster)?await getImageUrl(i.attribs.poster,arg,true):""])))
-      msg += videoList.map(([src,poster])=>h('video',{src,poster})).join("")
-      msg+=videoList.map(([src,poster])=>h('img',{src:poster})).join("")
-    } else if (template == "only text") {
-      html = cheerio.load(item.description)
-      msg = html.text()
-    } else if (template == "only media") {
-      html = cheerio.load(item.description)
-      
-      let imgList = []
-      html('img').map((key, i) => imgList.push(i.attribs.src))
-      imgList = await Promise.all([...new Set(imgList)].map(async src =>await getImageUrl(src, arg)))
-      msg = imgList.map(img => `<img src="${img}"/>`).join("")
+      // 【修复 1】: 删除了这里的 logger.info(msg)，因为函数末尾还会打印一次
 
-      await Promise.all(html('video').map(async(v,i)=>videoList.push([await getVideoUrl(i.attribs.src,arg,true,i),(i.attribs.poster&&config.basic.usePoster)?await getImageUrl(i.attribs.poster,arg,true):""])))
-      msg += videoList.map(([src,poster])=>h('video',{src,poster})).join("")
-    } else if (template == "only image") {
-      html = cheerio.load(item.description)
-      let imgList = []
-      html('img').map((key, i) => imgList.push(i.attribs.src))
-      imgList = await Promise.all([...new Set(imgList)].map(async src =>await getImageUrl(src, arg)))
-      msg = imgList.map(img => `<img src="${img}"/>`).join("")
-    } else if (template == "only video") {
-      html = cheerio.load(item.description)
-      // await Promise.all(html('video').map(async(v,i)=>videoList.push(await getVideoUrl(i.attribs.src,arg,true,i))))
-      // msg += videoList.map(src=>h.video(src,{poster:``})).join("")
-      await Promise.all(html('video').map(async(v,i)=>videoList.push([await getVideoUrl(i.attribs.src,arg,true,i),(i.attribs.poster&&config.basic.usePoster)?await getImageUrl(i.attribs.poster,arg,true):""])))
-      msg += videoList.map(([src,poster])=>h('video',{src,poster})).join("")
-    } else if (template == "proto") {
-      msg = item.description
-    } else if (template == "default") {
-      item.description = parseContent(getDefaultTemplate(config.template.bodyWidth, config.template.bodyPadding,config.template.bodyFontSize),{...item,arg})
-      debug(item.description,'description');
-      html = cheerio.load(item.description)
-      if(arg?.proxyAgent?.enabled){
-        await Promise.all(html('img').map(async(v,i)=>i.attribs.src = await getImageUrl(i.attribs.src,arg,true) )) 
+      await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
+      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+      msg += videoList.map(([src, poster]) => h('img', { src: poster })).join("");
+    }
+    else if (template == "only text") {
+      html = cheerio.load(item.description);
+      msg = html.text();
+    }
+    else if (template == "only media") {
+      html = cheerio.load(item.description);
+      let imgList: string[] = [];
+      html('img').map((key: any, i: any) => imgList.push(i.attribs.src));
+      imgList = await Promise.all([...new Set(imgList)].map(async (src: string) => await getImageUrl(src, arg)));
+      msg = imgList.map(img => `<img src="${img}"/>`).join("");
+      await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
+      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+    }
+    else if (template == "only image") {
+      html = cheerio.load(item.description);
+      let imgList: string[] = [];
+      html('img').map((key: any, i: any) => imgList.push(i.attribs.src));
+      imgList = await Promise.all([...new Set(imgList)].map(async (src: string) => await getImageUrl(src, arg)));
+      msg = imgList.map(img => `<img src="${img}"/>`).join("");
+    }
+    else if (template == "only video") {
+      html = cheerio.load(item.description);
+      await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
+      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+    }
+    else if (template == "proto") {
+      msg = item.description;
+    }
+    else if (template == "default") {
+      item.description = parseContent(getDefaultTemplate(config.template.bodyWidth, config.template.bodyPadding, config.template.bodyFontSize), { ...item, arg });
+      debug(item.description, 'description');
+      html = cheerio.load(item.description);
+      if (arg?.proxyAgent?.enabled) {
+        await Promise.all(html('img').map(async (v: any, i: any) => i.attribs.src = await getImageUrl(i.attribs.src, arg, true)));
       }
-      html('img').attr('style', 'object-fit:scale-down;max-width:100%;')
-      if(config.basic.imageMode=='base64'){
-        msg = (await renderHtml2Image(html.html())).toString()
-      }else if(config.basic.imageMode=='File'){
-        msg = await ctx.puppeteer.render(html.html())
-        msg = await puppeteerToFile(msg)
+      html('img').attr('style', 'object-fit:scale-down;max-width:100%;');
+      if (config.basic.imageMode == 'base64') {
+        msg = (await renderHtml2Image(html.html())).toString();
+      } else if (config.basic.imageMode == 'File') {
+        msg = await ctx.puppeteer.render(html.html());
+        msg = await puppeteerToFile(msg);
       }
-      if(config.basic.imageMode=='File')msg = await puppeteerToFile(msg)
-      // await Promise.all(html('video').map(async(v,i)=>videoList.push(await getVideoUrl(i.attribs.src,arg,true,i))))
-      // msg += videoList.map(src=>h.video(src)).join("")
-      await Promise.all(html('video').map(async(v,i)=>videoList.push([await getVideoUrl(i.attribs.src,arg,true,i),(i.attribs.poster&&config.basic.usePoster)?await getImageUrl(i.attribs.poster,arg,true):""])))
-      msg += videoList.map(([src,poster])=>h('video',{src,poster})).join("")
-    } else if (template == "only description") {
-      item.description =parseContent(getDescriptionTemplate(config.template.bodyWidth, config.template.bodyPadding,config.template.bodyFontSize),{...item,arg})
-      html = cheerio.load(item.description)
-      if(arg?.proxyAgent?.enabled){
-        await Promise.all(html('img').map(async(v,i)=>i.attribs.src = await getImageUrl(i.attribs.src,arg,true) )) 
+      if (config.basic.imageMode == 'File') msg = await puppeteerToFile(msg);
+      await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
+      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+    }
+    else if (template == "only description") {
+      item.description = parseContent(getDescriptionTemplate(config.template.bodyWidth, config.template.bodyPadding, config.template.bodyFontSize), { ...item, arg });
+      html = cheerio.load(item.description);
+      if (arg?.proxyAgent?.enabled) {
+        await Promise.all(html('img').map(async (v: any, i: any) => i.attribs.src = await getImageUrl(i.attribs.src, arg, true)));
       }
-      html('img').attr('style', 'object-fit:scale-down;max-width:100%;')
-      if(config.basic.imageMode=='base64'){
-        msg = (await renderHtml2Image(html.html())).toString()
-      }else if(config.basic.imageMode=='File'){
-        msg = await ctx.puppeteer.render(html.html())
-        msg = await puppeteerToFile(msg)
+      html('img').attr('style', 'object-fit:scale-down;max-width:100%;');
+      if (config.basic.imageMode == 'base64') {
+        msg = (await renderHtml2Image(html.html())).toString();
+      } else if (config.basic.imageMode == 'File') {
+        msg = await ctx.puppeteer.render(html.html());
+        msg = await puppeteerToFile(msg);
       }
-      // await Promise.all(html('video').map(async(v,i)=>videoList.push(await getVideoUrl(i.attribs.src,arg,true,i))))
-      // msg += videoList.map(src=>h.video(src)).join("")
-      await Promise.all(html('video').map(async(v,i)=>videoList.push([await getVideoUrl(i.attribs.src,arg,true,i),(i.attribs.poster&&config.basic.usePoster)?await getImageUrl(i.attribs.poster,arg,true):""])))
-      msg += videoList.map(([src,poster])=>h('video',{src,poster})).join("")
-    } else if (template == "link") {
-      html = cheerio.load(item.description)
-      let src = html('a')[0].attribs.href
-      debug(src,'link src','info')
-      let html2 = cheerio.load((await $http(src,arg)).data)
-      if(arg?.proxyAgent?.enabled){
-        await Promise.all(html2('img').map(async(v,i)=>i.attribs.src = await getImageUrl(i.attribs.src,arg,true) )) 
+      await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
+      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+    }
+    else if (template == "link") {
+      html = cheerio.load(item.description);
+      let src = html('a')[0].attribs.href;
+      debug(src, 'link src', 'info');
+      let html2 = cheerio.load((await $http(src, arg)).data);
+      if (arg?.proxyAgent?.enabled) {
+        await Promise.all(html2('img').map(async (v: any, i: any) => i.attribs.src = await getImageUrl(i.attribs.src, arg, true)));
       }
-      html2('img').attr('style', 'object-fit:scale-down;max-width:100%;')
-      html2('body').attr('style', `width:${config.template.bodyWidth}px;padding:${config.template.bodyPadding}px;`)
-      if(config.basic.imageMode=='base64'){
-        msg = (await renderHtml2Image(html2.xml())).toString()
-      }else if(config.basic.imageMode=='File'){
-        msg = await ctx.puppeteer.render(html2.xml())
-        msg = await puppeteerToFile(msg)
+      html2('img').attr('style', 'object-fit:scale-down;max-width:100%;');
+      html2('body').attr('style', `width:${config.template.bodyWidth}px;padding:${config.template.bodyPadding}px;`);
+      if (config.basic.imageMode == 'base64') {
+        msg = (await renderHtml2Image(html2.xml())).toString();
+      } else if (config.basic.imageMode == 'File') {
+        msg = await ctx.puppeteer.render(html2.xml());
+        msg = await puppeteerToFile(msg);
       }
     }
-    // msg = pushVideo(msg, html)
+
     if (config.msg.censor) {
-      msg = `<censor>${msg}</censor>`
+      msg = `<censor>${msg}</censor>`;
     }
-    debug(msg,"parse:msg",'info');
-    return msg
+    debug(msg, "parse:msg", 'info');
+    return msg;
   }
   const findRssItem = (rssList:any[],keyword:number|string)=>{
     let index = ((rssList.findIndex(i => i.rssId === +keyword) + 1) ||
@@ -863,20 +861,22 @@ export function apply(ctx: Context, config: Config) {
             debug(rssItemArray.map(i => i.title),'','info');
             messageList = await Promise.all(itemArray.filter((v, i) => i < arg.forceLength).map(async i => await parseRssItem(i, {...rssItem,...arg}, rssItem.author)))
           } else {
+            // 【修复 2】: 这里逻辑全部重写，去除有 Bug 的时间容错，改为严格大于
             rssItemArray = itemArray.filter((v, i) => {
-              const currentPubDate = parsePubDate(v.pubDate).getTime()
-              const lastPubDate = rssItem.lastPubDate?.getTime?.() || new Date(rssItem.lastPubDate).getTime()
-              // 使用 >= 替代 >，并添加5秒容错窗口防止时间精度问题
-              const isNewContent = currentPubDate >= (lastPubDate - 5000)
-              return isNewContent || rssItem.lastContent?.itemArray?.some(oldRssItem=>{
-                if(config.basic.resendUpdataContent==='disable')return false
+              const currentPubDate = parsePubDate(v.pubDate).getTime();
+              const lastPubDateVal = rssItem.lastPubDate?.getTime?.() || new Date(rssItem.lastPubDate).getTime();
+
+              // 关键修复：改为严格大于。 移除 -5000 缓冲区，避免死循环。
+              const isNewTime = currentPubDate > lastPubDateVal;
+
+              return isNewTime || rssItem.lastContent?.itemArray?.some(oldRssItem => {
+                if (config.basic.resendUpdataContent === 'disable') return false
                 let newItem = getLastContent(v)
-                let isSame = newItem.guid?newItem.guid===oldRssItem.guid:(newItem.link===oldRssItem.link&&newItem.title===oldRssItem.title)
-                // let newItem = lastContent.itemArray.find(i=>i.guid?(i.guid==oldRssItem.guid):(i.link==oldRssItem.link&&i.title==oldRssItem.title))
-                if(!isSame)return false
-                debug(JSON.stringify(oldRssItem.description),'oldRssItem','details')
-                debug(JSON.stringify(newItem.description),'newItem','details')
-                return JSON.stringify(oldRssItem.description)!==JSON.stringify(newItem.description)
+                let isSame = newItem.guid ? newItem.guid === oldRssItem.guid : (newItem.link === oldRssItem.link && newItem.title === oldRssItem.title)
+                if (!isSame) return false
+                debug(JSON.stringify(oldRssItem.description), 'oldRssItem', 'details')
+                debug(JSON.stringify(newItem.description), 'newItem', 'details')
+                return JSON.stringify(oldRssItem.description) !== JSON.stringify(newItem.description)
               })
             }).filter((v, i) => !arg.maxRssItem || i < arg.maxRssItem)
             if (!rssItemArray.length) continue
