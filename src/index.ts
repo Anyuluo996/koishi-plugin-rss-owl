@@ -4,7 +4,15 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import * as cheerio from 'cheerio';
 import { } from 'koishi-plugin-puppeteer'
 import { } from '@koishijs/censor'
-// import { } from '@koishijs/assets'
+
+// assets 服务类型声明
+declare module 'koishi' {
+  interface Context {
+    assets?: {
+      upload(dataUrl: string, filename: string): Promise<string>
+    }
+  }
+}
 const X2JS = require("x2js")
 const x2js = new X2JS()
 const logger = new Logger('rss-owl')
@@ -12,7 +20,7 @@ export const name = '@anyul/koishi-plugin-rss'
 import { pathToFileURL } from 'url'
 import * as fs from 'fs';
 import * as path from 'path';
-export const inject = { required: ["database"], optional: ["puppeteer", "censor"] }
+export const inject = { required: ["database"], optional: ["puppeteer", "censor", "assets"] }
 
 declare module 'koishi' {
   interface rssOwl {
@@ -48,8 +56,8 @@ interface BasicConfig {
   firstLoad?: boolean
   urlDeduplication?: boolean
   resendUpdataContent: 'disable'|'latest'|'all'
-  imageMode?: 'base64' | 'File'
-  videoMode?: 'filter'|'href'|'base64' | 'File'
+  imageMode?: 'base64' | 'File' | 'assets'
+  videoMode?: 'filter'|'href'|'base64' | 'File' | 'assets'
   autoSplitImage?: boolean
   cacheDir?: string
   replaceDir?: string
@@ -131,38 +139,44 @@ export const usage = `
 RSS-OWL 订阅器使用说明
 
 基本命令:
-  rsso <url>              - 订阅RSS链接
+  rsso &lt;url&gt;              - 订阅RSS链接
   rsso -l                 - 查看订阅列表
   rsso -l [id]            - 查看订阅详情
-  rsso -r <content>       - 删除订阅(需要权限)
-  rsso -T <url>           - 测试订阅
+  rsso -r &lt;content&gt;       - 删除订阅(需要权限)
+  rsso -T &lt;url&gt;           - 测试订阅
 
 常用选项:
-  -i <template>          - 设置消息模板
+  -i &lt;template&gt;          - 设置消息模板
       可选值: content(文字) | default(图片) | custom(自定义) | only text | only media 等
-  -t <title>             - 自定义订阅标题
-  -a <arg>               - 自定义配置 (格式: key:value,key2:value2)
+  -t &lt;title&gt;             - 自定义订阅标题
+  -a &lt;arg&gt;               - 自定义配置 (格式: key:value,key2:value2)
       例如: -a timeout:30,merge:true
 
 高级选项:
-  -f <content>           - 关注订阅，更新时提醒
-  -fAll <content>        - 全体关注(需要高级权限)
-  -target <groupId>      - 跨群订阅(需要高级权限)
-  -d <time>              - 定时推送 (格式: "HH:mm/数量" 或 "HH:mm")
+  -f &lt;content&gt;           - 关注订阅，更新时提醒
+  -fAll &lt;content&gt;        - 全体关注(需要高级权限)
+  -target &lt;groupId&gt;      - 跨群订阅(需要高级权限)
+  -d &lt;time&gt;              - 定时推送 (格式: "HH:mm/数量" 或 "HH:mm")
       例如: -d "08:00/5" 表示每天8点推送5条
-  -p <id>                - 手动拉取最新内容
+  -p &lt;id&gt;                - 手动拉取最新内容
 
 快速订阅:
   rsso -q                - 查看快速订阅列表
   rsso -q [编号]         - 查看快速订阅详情
   rsso -T tg:channel_name  - 快速订阅Telegram频道
 
+Assets 图片/视频服务配置 (推荐):
+  使用 assets 服务可以避免 Base64 超长问题
+  1. 在插件市场安装 assets-xxx 插件 (如 assets-local, assets-s3, assets-smms 等)
+  2. 在对应插件中配置存储信息 (AccessKey, Secret, Bucket 等)
+  3. 在 RSS-Owl 基础设置中将 imageMode/videoMode 设置为 'assets'
+  4. 插件会自动上传图片/视频到你的图床服务
+
 配置示例:
   rsso -T -i content "https://example.com/rss"
   rsso "https://example.com/rss" -t "我的订阅" -a "timeout:60,merge:true"
   rsso -d "09:00/3" "https://example.com/rss"
 
-更多信息请访问: https://github.com/borraken/koishi-plugin-rss-owl
 `
 const templateList = ['auto','content', 'only text', 'only media','only image', 'only video', 'proto', 'default', 'only description', 'custom','link']
 
@@ -179,8 +193,8 @@ export const Config = Schema.object({
     firstLoad: Schema.boolean().description('首次订阅时是否发送最后的更新').default(true),
     urlDeduplication: Schema.boolean().description('同群组中不允许重复添加相同订阅').default(true),
     resendUpdataContent: Schema.union(['disable','latest','all']).description('当内容更新时再次发送').default('disable').experimental(),
-    imageMode: Schema.union(['base64', 'File']).description('图片发送模式，使用File可以解决部分图片无法发送的问题，但无法在沙盒中使用').default('base64'),
-    videoMode: Schema.union(['filter','href','base64', 'File']).description('视频发送模式（iframe标签内的视频无法处理）<br> \`filter\` 过滤视频，含有视频的推送将不会被发送<br> \`href\` 使用视频网络地址直接发送<br> \`base64\` 下载后以base64格式发送<br> \`File\` 下载后以文件发送').default('href'),
+    imageMode: Schema.union(['base64', 'File', 'assets']).description('图片发送模式<br>\`base64\` Base64格式（兼容性好但容易超长）<br>\`File\` 本地文件（不支持沙盒环境）<br>\`assets\` Assets服务（推荐，需安装assets-xxx插件并配置）').default('base64'),
+    videoMode: Schema.union(['filter','href','base64', 'File', 'assets']).description('视频发送模式（iframe标签内的视频无法处理）<br>\`filter\` 过滤视频，含有视频的推送将不会被发送<br>\`href\` 使用视频网络地址直接发送<br>\`base64\` 下载后以base64格式发送<br>\`File\` 下载后以文件发送<br>\`assets\` 上传到assets服务（需安装assets-xxx插件并配置）').default('href'),
     margeVideo: Schema.boolean().default(false).description('以合并消息发送视频'),
     usePoster: Schema.boolean().default(false).description('加载视频封面'),
     autoSplitImage: Schema.boolean().description('垂直拆分大尺寸图片，解决部分适配器发不出长图的问题').default(true),
@@ -297,6 +311,28 @@ export function apply(ctx: Context, config: Config) {
   const getImageUrl = async (url, arg,useBase64Mode=false) => {
     debug('imgUrl:'+url,'','details')
     if(!url)return ''
+
+    // 如果配置了 assets 且 ctx 中有该服务，优先处理
+    if (config.basic.imageMode === 'assets' && ctx.assets && !useBase64Mode) {
+      try {
+        let res = await $http(url, arg, { responseType: 'arraybuffer', timeout: 30000 })
+        let contentType = res.headers["content-type"] || 'image/jpeg' // 兜底 contentType
+        let suffix = contentType?.split('/')[1] || 'jpg'
+
+        // ★★★ 修复点：转为 Data URL 字符串再上传 ★★★
+        const buffer = Buffer.from(res.data, 'binary')
+        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`
+
+        let assetUrl = await ctx.assets.upload(base64, `rss-img-${Date.now()}.${suffix}`)
+        debug(`Assets 上传成功: ${assetUrl}`, 'assets', 'info')
+        return assetUrl
+      } catch (error) {
+        debug(`Assets 上传失败，降级为 Base64: ${error}`, 'assets error', 'error')
+        // 降级到 base64 模式（不设置 useBase64Mode 避免递归）
+        // 这里直接使用 base64 逻辑
+      }
+    }
+
     let res
     try {
       res = await $http(url, arg, { responseType: 'arraybuffer', timeout: 30000 })
@@ -309,7 +345,7 @@ export function apply(ctx: Context, config: Config) {
     let prefix = res.headers["content-type"] || ('image/' + (prefixList.find(i => new RegExp(i).test(url)) || 'jpeg'))
     let base64Prefix = `data:${prefix};base64,`
     let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
-    if (config.basic.imageMode == 'base64'||useBase64Mode) {
+    if (config.basic.imageMode == 'base64'||useBase64Mode || config.basic.imageMode === 'assets') {
       return base64Data
     } else if (config.basic.imageMode == 'File') {
       let fileUrl = await writeCacheFile(base64Data)
@@ -321,27 +357,64 @@ export function apply(ctx: Context, config: Config) {
     let res
     if(config.basic.videoMode == "href"){
       return src
-    }else{
+    }
+
+    // assets 模式
+    if (config.basic.videoMode === 'assets' && ctx.assets) {
       try {
         res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 0 })
+        let contentType = res.headers["content-type"] || 'video/mp4'
+        let suffix = contentType?.split('/')[1] || 'mp4'
+
+        // ★★★ 修复点：转为 Data URL 字符串再上传 ★★★
+        const buffer = Buffer.from(res.data, 'binary')
+        // 注意：视频 Base64 可能会非常长，部分 assets 插件可能处理较慢，但比 Buffer 兼容性好
+        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`
+
+        let assetUrl = await ctx.assets.upload(base64, `rss-video-${Date.now()}.${suffix}`)
+        debug(`视频 Assets 上传成功: ${assetUrl}`, 'assets', 'info')
+        return assetUrl
       } catch (error) {
-        debug(`视频请求失败: ${error}`, 'video error', 'error')
-        return ''
+        debug(`视频 Assets 上传失败，降级为 Base64: ${error}`, 'assets error', 'error')
+        // 降级到 base64 模式
       }
-      let prefix = res.headers["content-type"]
-      let base64Prefix = `data:${prefix};base64,`
-      let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
-      if (config.basic.videoMode == 'base64') {
-        return base64Data
-      } else if (config.basic.videoMode == 'File') {
-        let fileUrl = await writeCacheFile(base64Data)
-        return fileUrl
-      }
+    }
+
+    try {
+      res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 0 })
+    } catch (error) {
+      debug(`视频请求失败: ${error}`, 'video error', 'error')
+      return ''
+    }
+    let prefix = res.headers["content-type"]
+    let base64Prefix = `data:${prefix};base64,`
+    let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
+    if (config.basic.videoMode == 'base64' || config.basic.videoMode === 'assets') {
+      return base64Data
+    } else if (config.basic.videoMode == 'File') {
+      let fileUrl = await writeCacheFile(base64Data)
+      return fileUrl
     }
   }
   const puppeteerToFile = async (puppeteer: string) => {
-    let base64 = /(?<=src=").+?(?=")/.exec(puppeteer)[0]
+    let base64 = /(?<=src=").+?(?=")/.exec(puppeteer)?.[0]
+    if (!base64) return puppeteer
     const buffer = Buffer.from(base64.substring(base64.indexOf(',') + 1), 'base64');
+
+    // assets 模式
+    if (config.basic.imageMode === 'assets' && ctx.assets) {
+      try {
+        // ★★★ 修复点：直接传递 base64 字符串给 upload，不要转 Buffer ★★★
+        // base64 变量本身就是 "data:image/png;base64,..." 格式
+        const url = await ctx.assets.upload(base64, `rss-screenshot-${Date.now()}.png`)
+        debug(`截图 Assets 上传成功: ${url}`, 'assets', 'info')
+        return `<img src="${url}"/>`
+      } catch (error) {
+        debug(`截图 Assets 上传失败，降级为 File: ${error}`, 'assets error', 'error')
+        // 降级到 File 模式
+      }
+    }
+
     const MB = buffer.length / 1e+6
     debug("MB: " + MB,'file size','details');
     return `<file src="${await writeCacheFile(base64)}"/>`
@@ -533,35 +606,61 @@ export function apply(ctx: Context, config: Config) {
     try {
       debug(htmlContent,'htmlContent','details')
       await page.setContent(htmlContent)
-      
+
       if(!config.basic.autoSplitImage) {
         const image = await page.screenshot({type:"png"})
+        // assets 模式
+        if (config.basic.imageMode === 'assets' && ctx.assets) {
+          try {
+            // ★★★ 修复点：Buffer 转 Data URL ★★★
+            const base64 = `data:image/png;base64,${image.toString('base64')}`
+            const url = await ctx.assets.upload(base64, `rss-shot-${Date.now()}.png`)
+            debug(`HTML截图 Assets 上传成功: ${url}`, 'assets', 'info')
+            return h.image(url)
+          } catch (error) {
+            debug(`HTML截图 Assets 上传失败，降级为 Base64: ${error}`, 'assets error', 'error')
+            // 降级到 base64
+          }
+        }
         return h.image(image,'image/png')
       }
-      
+
       let [height,width,x,y] = await page.evaluate(()=>[
         document.body.offsetHeight,
         document.body.offsetWidth,
         parseInt(document.defaultView.getComputedStyle(document.body).marginLeft)||0,
         parseInt(document.defaultView.getComputedStyle(document.body).marginTop)||0
       ])
-      
+
       let size = 10000
       debug([height,width,x,y],'pptr img size','details')
       const split = Math.ceil(height/size)
-      
+
       if(!split) {
         const image = await page.screenshot({type:"png",clip:{x,y,width,height}})
+        // assets 模式
+        if (config.basic.imageMode === 'assets' && ctx.assets) {
+          try {
+            // ★★★ 修复点：Buffer 转 Data URL ★★★
+            const base64 = `data:image/png;base64,${image.toString('base64')}`
+            const url = await ctx.assets.upload(base64, `rss-shot-${Date.now()}.png`)
+            debug(`HTML截图 Assets 上传成功: ${url}`, 'assets', 'info')
+            return h.image(url)
+          } catch (error) {
+            debug(`HTML截图 Assets 上传失败，降级为 Base64: ${error}`, 'assets error', 'error')
+            // 降级到 base64
+          }
+        }
         return h.image(image,'image/png')
       }
-      
+
       debug({height,width,split},'split img','details')
-      
+
       const reduceY = (index) => Math.floor(height/split*index)
       const reduceHeight = (index) => Math.floor(height/split)
-      
+
       let imgData = await Promise.all(
-        Array.from({length:split}, async(v,i) => 
+        Array.from({length:split}, async(v,i) =>
           await page.screenshot({
             type:"png",
             clip:{
@@ -573,9 +672,25 @@ export function apply(ctx: Context, config: Config) {
           })
         )
       )
-      
+
+      // assets 模式
+      if (config.basic.imageMode === 'assets' && ctx.assets) {
+        try {
+          // ★★★ 修复点：Buffer 数组转 Data URL 数组 ★★★
+          const urls = await Promise.all(imgData.map((buf, i) => {
+            const base64 = `data:image/png;base64,${buf.toString('base64')}`
+            return ctx.assets.upload(base64, `rss-split-${Date.now()}-${i}.png`)
+          }))
+          debug(`切割截图 Assets 上传成功: ${urls.length} 个文件`, 'assets', 'info')
+          return urls.map(u => h.image(u)).join("")
+        } catch (error) {
+          debug(`切割截图 Assets 上传失败，降级为 Base64: ${error}`, 'assets error', 'error')
+          // 降级到 base64
+        }
+      }
+
       return imgData.map(i=>h.image(i,'image/png')).join("")
-      
+
     } finally {
       await page.close() // 确保页面被关闭
     }
@@ -696,27 +811,37 @@ export function apply(ctx: Context, config: Config) {
       }
       msg = parseContent(config.template.customRemark, { ...item, arg, description: msg });
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
-      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+
+      // ★★★ 修复点：过滤掉没有 src 的视频 ★★★
+      msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
     }
     else if (template == "content") {
       html = cheerio.load(item.description);
       let imgList: string[] = [];
       html('img').map((key: any, i: any) => imgList.push(i.attribs.src));
       imgList = [...new Set(imgList)];
+      // 获取所有图片链接
       let imgBufferList = Object.assign({}, ...(await Promise.all(imgList.map(async (src: string) => ({ [src]: await getImageUrl(src, arg) })))));
+
+      // 占位符替换
       html('img').replaceWith((key: any, Dom: any) => `<p>$img{{${imgList[key]}}}</p>`);
       msg = html.text();
+
+      // ★★★ 修复点：如果 finalUrl 为空，返回空字符串，不要生成 <img src=""/> ★★★
       item.description = msg.replace(/\$img\{\{(.*?)\}\}/g, (match: string) => {
         let src = match.match(/\$img\{\{(.*?)\}\}/)[1];
-        return `<img src="${imgBufferList[src]}"/>`;
+        let finalUrl = imgBufferList[src];
+        return finalUrl ? `<img src="${finalUrl}"/>` : '';
       });
+
       msg = parseContent(config.template.content, { ...item, arg });
 
-      // 【修复 1】: 删除了这里的 logger.info(msg)，因为函数末尾还会打印一次
-
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
-      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
-      msg += videoList.map(([src, poster]) => h('img', { src: poster })).join("");
+
+      // ★★★ 修复点：过滤掉没有 src 的视频 ★★★
+      msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
+      // ★★★ 修复点：过滤掉没有 src 的视频封面图 ★★★
+      msg += videoList.filter(([src, poster]) => poster).map(([src, poster]) => h('img', { src: poster })).join("");
     }
     else if (template == "only text") {
       html = cheerio.load(item.description);
@@ -727,21 +852,30 @@ export function apply(ctx: Context, config: Config) {
       let imgList: string[] = [];
       html('img').map((key: any, i: any) => imgList.push(i.attribs.src));
       imgList = await Promise.all([...new Set(imgList)].map(async (src: string) => await getImageUrl(src, arg)));
-      msg = imgList.map(img => `<img src="${img}"/>`).join("");
+
+      // ★★★ 修复点：过滤空图片 ★★★
+      msg = imgList.filter(Boolean).map(img => `<img src="${img}"/>`).join("");
+
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
-      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+
+      // ★★★ 修复点：过滤空视频 ★★★
+      msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
     }
     else if (template == "only image") {
       html = cheerio.load(item.description);
       let imgList: string[] = [];
       html('img').map((key: any, i: any) => imgList.push(i.attribs.src));
       imgList = await Promise.all([...new Set(imgList)].map(async (src: string) => await getImageUrl(src, arg)));
-      msg = imgList.map(img => `<img src="${img}"/>`).join("");
+
+      // ★★★ 修复点：过滤空图片 ★★★
+      msg = imgList.filter(Boolean).map(img => `<img src="${img}"/>`).join("");
     }
     else if (template == "only video") {
       html = cheerio.load(item.description);
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
-      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+
+      // ★★★ 修复点：过滤掉没有 src 的视频 ★★★
+      msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
     }
     else if (template == "proto") {
       msg = item.description;
@@ -762,7 +896,9 @@ export function apply(ctx: Context, config: Config) {
       }
       if (config.basic.imageMode == 'File') msg = await puppeteerToFile(msg);
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
-      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+
+      // ★★★ 修复点：过滤掉没有 src 的视频 ★★★
+      msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
     }
     else if (template == "only description") {
       item.description = parseContent(getDescriptionTemplate(config.template.bodyWidth, config.template.bodyPadding, config.template.bodyFontSize), { ...item, arg });
@@ -778,7 +914,9 @@ export function apply(ctx: Context, config: Config) {
         msg = await puppeteerToFile(msg);
       }
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
-      msg += videoList.map(([src, poster]) => h('video', { src, poster })).join("");
+
+      // ★★★ 修复点：过滤掉没有 src 的视频 ★★★
+      msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
     }
     else if (template == "link") {
       html = cheerio.load(item.description);
@@ -885,7 +1023,11 @@ export function apply(ctx: Context, config: Config) {
             messageList = await Promise.all(rssItemArray.reverse().map(async i => await parseRssItem(i, {...rssItem,...arg}, rssItem.author)))
           }
           let message
-          if(!messageList.join(""))return
+          if(!messageList.join("")){
+            // 如果解析不出内容，也应该更新时间，防止反复解析空内容
+            await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { lastPubDate, arg:originalArg, lastContent })
+            continue
+          }
           if (arg.merge===true) {
             message = `<message forward><author id="${rssItem.author}"/>${messageList.join("")}</message>`
           } else if (arg.merge === false) {
@@ -903,10 +1045,26 @@ export function apply(ctx: Context, config: Config) {
           if(rssItem.followers.length){
             message += `<message>${rssItem.followers.map(followId=>`<at ${followId=='all'?'type':'id'}='${followId}'/>` )}</message>`
           }
-          const broadcast = await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
-          if(!broadcast[0])throw new Error('发送失败')
-          await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { lastPubDate,arg:originalArg,lastContent })
-          debug(`更新成功:${rssItem.title}`,'','info')
+
+          // 发送逻辑改进：捕获发送错误，防止死循环
+          try {
+            const broadcast = await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
+            if(!broadcast.length) {
+              logger.warn(`RSS [${rssItem.title}] 消息生成成功但未发送给任何目标 (可能群不存在或Bot被禁言)`)
+            } else {
+              debug(`更新成功:${rssItem.title}`,'','info')
+            }
+          } catch (sendError) {
+            logger.error(`RSS推送失败 [${rssItem.title}]: ${sendError.message}`)
+            logger.warn(`已跳过该条 RSS 更新以防止无限重试循环。`)
+          }
+
+          // 关键：无论发送成功还是失败，都更新数据库状态，防止死循环
+          try {
+            await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { lastPubDate, arg:originalArg, lastContent })
+          } catch (dbError) {
+            logger.error(`数据库更新失败: ${dbError}`)
+          }
         } catch (error) {
           debug(error,`更新失败:${JSON.stringify({...rssItem,lastContent:"..."})}`,'error')
         }
