@@ -126,7 +126,7 @@ export interface rss {
 }
 export interface rssArg {
   template?: 'auto' | 'content' | 'only text' | 'only media' | 'only image' | 'only video' | 'proto' | 'default' | 'only description' | 'custom' | 'link'
-  content: string | never
+  content?: string
 
   forceLength?: number
   timeout?: number
@@ -147,25 +147,36 @@ export interface rssArg {
   split?:number
 
   nextUpdataTime?: number
+
+  // HTML 监控相关字段
+  type?: 'rss' | 'html'
+  selector?: string
+  textOnly?: boolean
+  mode?: 'static' | 'puppeteer'
+  waitFor?: number
+  waitSelector?: string
 }
 export const usage = `
-RSS-OWL 订阅器使用说明
+<details>
+<summary>RSS-OWL 订阅器使用说明</summary>
 
-基本命令:
+## 基本命令:
   rsso &lt;url&gt;              - 订阅RSS链接
   rsso -l                 - 查看订阅列表
   rsso -l [id]            - 查看订阅详情
   rsso -r &lt;content&gt;       - 删除订阅(需要权限)
   rsso -T &lt;url&gt;           - 测试订阅
+  rsso.ask &lt;url&gt; &lt;需求&gt;  - AI 智能订阅网页 (需要 AI 配置)
+  rsso.watch &lt;url&gt; [关键词] - 简单网页监控 (关键词/整页)
 
-常用选项:
+## 常用选项:
   -i &lt;template&gt;          - 设置消息模板
       可选值: content(文字) | default(图片) | custom(自定义) | only text | only media 等
   -t &lt;title&gt;             - 自定义订阅标题
   -a &lt;arg&gt;               - 自定义配置 (格式: key:value,key2:value2)
       例如: -a timeout:30,merge:true
 
-高级选项:
+## 高级选项:
   -f &lt;content&gt;           - 关注订阅，更新时提醒
   -fAll &lt;content&gt;        - 全体关注(需要高级权限)
   -target &lt;groupId&gt;      - 跨群订阅(需要高级权限)
@@ -173,23 +184,65 @@ RSS-OWL 订阅器使用说明
       例如: -d "08:00/5" 表示每天8点推送5条
   -p &lt;id&gt;                - 手动拉取最新内容
 
-快速订阅:
+## 快速订阅:
   rsso -q                - 查看快速订阅列表
   rsso -q [编号]         - 查看快速订阅详情
   rsso -T tg:channel_name  - 快速订阅Telegram频道
 
-Assets 图片/视频服务配置 (推荐):
+## Assets 图片/视频服务配置 (推荐):
   使用 assets 服务可以避免 Base64 超长问题
   1. 在插件市场安装 assets-xxx 插件 (如 assets-local, assets-s3, assets-smms 等)
   2. 在对应插件中配置存储信息 (AccessKey, Secret, Bucket 等)
   3. 在 RSS-Owl 基础设置中将 imageMode/videoMode 设置为 'assets'
   4. 插件会自动上传图片/视频到你的图床服务
 
-配置示例:
+## 配置示例:
   rsso -T -i content "https://example.com/rss"
   rsso "https://example.com/rss" -t "我的订阅" -a "timeout:60,merge:true"
   rsso -d "09:00/3" "https://example.com/rss"
 
+</details>
+
+<details>
+<summary>网页监控 (rsso.html) - 监控任意网页元素变化</summary>
+
+使用 CSS 选择器监控网页元素变化，支持静态网页和 SPA 动态页面。
+
+## 基本用法:
+  rsso.html &lt;url&gt; -s &lt;selector&gt;      - 监控符合选择器的元素
+
+## 常用选项:
+  -s, --selector &lt;选择器&gt;    CSS 选择器 (必填)，例如: .news-item、#price、div.list > li
+  -t, --title &lt;标题&gt;         自定义订阅标题
+  -i, --template &lt;模板&gt;      消息模板 (推荐 content)
+  --text                     只提取纯文本 (默认提取 HTML)
+  -T, --test                 测试模式，查看抓取预览
+
+## Puppeteer 动态渲染 (解决 SPA/JS 动态内容):
+  -P, --puppeteer            使用 Puppeteer 渲染页面 (需要安装 koishi-plugin-puppeteer)
+  -w, --wait &lt;毫秒&gt;          渲染后等待时间
+  -W, --waitSelector &lt;选择器&gt;  等待特定元素出现
+
+</details>
+
+<details>
+<summary>AI 摘要 (ai) - 智能生成内容摘要</summary>
+
+使用 OpenAI 兼容 API 为订阅内容生成 AI 摘要。
+
+## 启用方法:
+  1. 在插件配置中开启 AI 功能
+  2. 填写 API Base URL、API Key 和模型名称
+
+## 配置项:
+  - placement           摘要位置: top (顶部) / bottom (底部)
+  - separator          分割线样式
+  - prompt             提示词模板 ({{title}} 标题, {{content}} 内容)
+  - maxInputLength     最大输入长度 (默认 2000 字)
+  - timeout            请求超时 (默认 30000 毫秒)
+
+
+</details>
 `
 const templateList = ['auto','content', 'only text', 'only media','only image', 'only video', 'proto', 'default', 'only description', 'custom','link']
 
@@ -394,6 +447,71 @@ export function apply(ctx: Context, config: Config) {
     } catch (error) {
       debug(`AI 摘要生成失败: ${error.message}`, 'AI', 'error')
       return ''
+    }
+  }
+
+  // --- AI 智能生成 CSS 选择器 ---
+  const generateSelectorByAI = async (url: string, instruction: string, html: string) => {
+    if (!config.ai.enabled || !config.ai.apiKey) throw new Error('需在配置中开启 AI 功能并填写 API Key')
+
+    // 预处理 HTML
+    const $ = cheerio.load(html)
+    $('script, style, svg, path, link, meta, noscript').remove()
+    $('*').contents().each((_, e) => { if (e.type === 'comment') $(e).remove() })
+
+    // 限制长度节省 token
+    let cleanHtml = $('body').html()?.replace(/\s+/g, ' ').trim().substring(0, 15000) || ''
+
+    const prompt = `
+    作为一名爬虫专家，请根据提供的 HTML 代码片段，为一个网页监控工具生成一个 CSS Selector。
+
+    目标网页：${url}
+    用户需求：${instruction}
+
+    要求：
+    1. 只返回 CSS Selector 字符串，不要包含任何解释、Markdown 标记或代码块符号。
+    2. Selector 必须尽可能精确，通常用于提取列表中的一项或多项。
+    3. 如果是列表，请确保 Selector 能选中列表项的容器。
+
+    HTML片段：
+    ${cleanHtml}
+    `
+
+    try {
+      debug(`正在请求 AI 生成选择器: ${instruction}`, 'AI-Selector', 'info')
+
+      const requestConfig: any = {
+        headers: {
+          'Authorization': `Bearer ${config.ai.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000,
+      }
+
+      if (config.net.proxyAgent?.enabled) {
+        const proxyUrl = `${config.net.proxyAgent.protocol}://${config.net.proxyAgent.host}:${config.net.proxyAgent.port}`
+        requestConfig.httpsAgent = new HttpsProxyAgent(proxyUrl)
+        requestConfig.proxy = false
+      }
+
+      const response = await axios.post(
+        `${config.ai.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+        {
+          model: config.ai.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1
+        },
+        requestConfig
+      )
+
+      let selector = response.data?.choices?.[0]?.message?.content?.trim()
+      selector = selector?.replace(/`/g, '')?.replace(/^css/i, '')?.trim()
+
+      debug(`AI 生成的选择器: ${selector}`, 'AI-Selector', 'info')
+      return selector
+    } catch (error) {
+      debug(`AI 生成选择器失败: ${error.message}`, 'AI-Selector', 'error')
+      throw error
     }
   }
 
@@ -781,16 +899,73 @@ export function apply(ctx: Context, config: Config) {
       return imgData.map(i=>h.image(i,'image/png')).join("")
 
     } finally {
-      await page.close() // 确保页面被关闭
+      try { await page.close() } catch (e) { /* 忽略页面已关闭的错误 */ }
     }
+  }
+
+  // --- 辅助函数：确保 URL 包含协议并去除多余空格 ---
+  const ensureUrlProtocol = (url: string) => {
+    if (!url) return ''
+    // 去除首尾空格，并只取第一个空格前的内容 (防止贪婪匹配导致的错误)
+    url = url.trim().split(/\s+/)[0]
+
+    if (!/^https?:\/\//i.test(url)) {
+      return `https://${url}`
+    }
+    return url
   }
 
   // 修改 getRssData 函数的并发处理
   const getRssData = async (url, config: rssArg) => {
     try {
-      const res = await $http(url, config)
-      let rssData = res.data
-      const contentType = res.headers['content-type'] || ''
+      // --- HTML 抓取预处理 START ---
+      let rssData: any
+      let contentType = ''
+
+      if (config.type === 'html' && config.mode === 'puppeteer') {
+        // Puppeteer 动态渲染模式
+        if (!ctx.puppeteer) throw new Error('未安装 puppeteer 插件，无法使用动态渲染模式')
+
+        const page = await ctx.puppeteer.page()
+        try {
+          debug(`Puppeteer抓取: ${url}`, 'html-scraping', 'info')
+
+          // 设置 User-Agent (使用默认 UA)
+          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+          // 隐藏 webdriver
+          await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false })
+          })
+
+          await page.setViewport({ width: 1920, height: 1080 })
+          await page.goto(url, { waitUntil: 'networkidle2', timeout: (config.timeout || 30) * 1000 })
+
+          // 等待特定元素或时间
+          if (config.waitSelector) {
+            try { await page.waitForSelector(config.waitSelector, { timeout: 5000 }) } catch (e) {}
+          } else if (config.waitFor) {
+            await new Promise(r => setTimeout(r, config.waitFor))
+          }
+
+          // 模拟滚动触发懒加载
+          await page.evaluate(async () => {
+            window.scrollBy(0, window.innerHeight)
+          })
+          await new Promise(r => setTimeout(r, 1000))
+
+          rssData = await page.content()
+          contentType = 'text/html'
+        } finally {
+          try { await page.close() } catch (e) { /* 忽略页面已关闭的错误 */ }
+        }
+      } else {
+        // 静态模式：使用 axios
+        const res = await $http(url, config)
+        rssData = res.data
+        contentType = res.headers['content-type'] || ''
+      }
+      // --- HTML 抓取预处理 END ---
 
       // 定义通用内容清洗函数 (保持原逻辑)
       let parseContent = (content, attr = undefined) => {
@@ -870,6 +1045,65 @@ export function apply(ctx: Context, config: Config) {
         return items;
       }
       // --- JSON 处理结束 ---
+
+      // --- HTML 抓取逻辑 START ---
+      if (config.type === 'html' && config.selector) {
+        debug(`HTML抓取: ${url} selector: ${config.selector}`, 'html-scraping', 'info');
+        const $ = cheerio.load(rssData);
+        const selected = $(config.selector);
+
+        if (selected.length === 0) {
+          debug('未找到符合 selector 的元素', 'html-scraping', 'info');
+          return [];
+        }
+
+        // 构造伪 RSS Items
+        const items = selected.map((i, el) => {
+          const $el = $(el);
+
+          // 1. 尝试提取标题
+          let title = $el.attr('title') || $el.text().trim().replace(/\s+/g, ' ');
+          if (title.length > 50) title = title.substring(0, 50) + '...';
+
+          // 2. 尝试提取链接
+          let link = $el.attr('href') || $el.find('a').attr('href') || url;
+          if (link && !link.startsWith('http')) {
+             try {
+               link = new URL(link, url).href;
+             } catch (e) {}
+          }
+
+          // 3. 提取内容
+          const description = config.textOnly ? $el.text().trim() : ($el.html() || '').trim();
+
+          // 4. 生成唯一标识
+          const guid = link !== url ? link : description;
+
+          // 5. 构造父级引用
+          const rssMock = {
+            channel: {
+              title: $('title').text() || 'Web Monitor',
+              description: url,
+              link: url,
+              image: { url: '' }
+            }
+          };
+
+          return {
+            title: title || 'No Title',
+            description: description,
+            link: link,
+            guid: guid,
+            pubDate: new Date(0), // 静态网页无时间戳，强制走内容对比
+            author: 'Web Monitor',
+            rss: rssMock
+          };
+        }).get();
+
+        debug(items[0], 'Parsed HTML Item', 'details');
+        return items;
+      }
+      // --- HTML 抓取逻辑 END ---
 
       // --- 原有 XML 处理逻辑 ---
       const rssJson = x2js.xml2js(rssData)
@@ -1636,4 +1870,370 @@ export function apply(ctx: Context, config: Config) {
         return `添加失败:${error}`
       }
     })
+
+  // --- 通用测试函数：封装了抓取、排序、解析和消息封装 ---
+  const runTestSubscription = async (urlInput: string, arg: rssArg, authorId: string, mockTitle: string = '测试订阅') => {
+    try {
+      if (!urlInput) return '请输入URL'
+
+      // 1. 处理 URL (支持 | 分隔，支持快速订阅前缀)
+      const urlList = urlInput.split('|').map(parseQuickUrl)
+
+      // 2. 获取订阅源数据
+      let rssItemList
+      try {
+        rssItemList = await Promise.all(urlList.map(async url => await getRssData(url, arg)))
+      } catch (error) {
+        throw new Error(`订阅源请求失败: ${error.message || error}\nURL: ${urlInput}`)
+      }
+
+      // 扁平化数组
+      const itemArray = rssItemList.flat(1)
+
+      if (itemArray.length === 0) {
+        return '未抓取到任何内容。请检查 URL、选择器或反爬策略。'
+      }
+
+      // 3. 排序
+      itemArray.sort((a, b) => parsePubDate(b.pubDate).getTime() - parsePubDate(a.pubDate).getTime())
+
+      // 4. 截取数量
+      const limit = arg.forceLength || 1
+      const rssItemArray = itemArray
+        .filter((v, i) => i < limit)
+        .filter((v, i) => arg.maxRssItem ? (i < arg.maxRssItem) : true)
+
+      if (rssItemArray.length === 0) return '内容被过滤，无剩余条目显示。'
+
+      // 5. 构造 Mock 订阅对象
+      const mockSubscribe = {
+        url: urlInput,
+        title: mockTitle,
+        platform: 'test',
+        guildId: 'test',
+        author: authorId,
+        arg: arg
+      }
+
+      // 6. 解析并生成消息
+      let messageList
+      try {
+        messageList = (await Promise.all(
+          rssItemArray.reverse().map(async i => await parseRssItem(i, { ...mockSubscribe, ...arg }, authorId))
+        )).flat(Infinity)
+      } catch (error) {
+        throw new Error(`内容解析失败: ${error}`)
+      }
+
+      // 7. 返回合并转发消息
+      const successInfo = `✅ 抓取成功 (共 ${itemArray.length} 条，显示 ${messageList.length} 条)`
+      return `<message forward>
+        <message>${successInfo}</message>
+        ${messageList.join('')}
+      </message>`
+
+    } catch (error) {
+      return `❌ 测试失败: ${error.message || error}`
+    }
+  }
+
+    // --- rssowl.html 命令：网页监控 ---
+    ctx.guild()
+      .command('rssowl.html <url:string>', '监控静态网页 (CSS Selector)')
+      .alias('rsso.html')
+      .usage(`
+      使用 CSS 选择器监控网页元素变化。
+      示例: rsso.html https://www.zhihu.com/billboard -s ".BillBoard-item:first-child"
+      `)
+      .option('selector', '-s <selector:string> CSS选择器 (必填)')
+      .option('text', '只监控纯文本变化 (默认监控 HTML)')
+      .option('title', '-t <content> 自定义订阅标题')
+      .option('template', '-i <template> 消息模板 (推荐 content)')
+      .option('puppeteer', '-P 使用 Puppeteer 渲染 (解决 SPA/JS 动态内容)')
+      .option('wait', '-w <ms:number> Puppeteer 等待时间 (默认 0)')
+      .option('waitSelector', '-W <selector:string> Puppeteer 等待元素出现')
+      .option('test', '-T 测试抓取结果')
+      .action(async ({ session, options }, url) => {
+        if (!url) return '请输入 URL'
+        if (!options.selector && !options.test) return '请使用 -s 指定 CSS 选择器 (例如: .news-item)'
+
+        // 自动补全 URL 协议
+        url = ensureUrlProtocol(url)
+
+        const { id: guildId } = session.event.guild as any
+        const { platform } = session.event as any
+        const { id: author } = session.event.user as any
+
+        // 构造参数
+        const arg: rssArg = {
+          type: 'html',
+          selector: options.selector,
+          textOnly: options.text || false,
+          template: options.template || 'content',
+          mode: options.puppeteer ? 'puppeteer' : 'static',
+          waitFor: options.wait || 0,
+          waitSelector: options.waitSelector,
+          timeout: config.basic.timeout,
+          merge: config.basic.merge === '有多条更新时合并' || config.basic.merge === '一直合并',
+        }
+
+        // 测试模式
+        if (options.test) {
+          if (!options.selector) return '测试模式也需要指定选择器 (-s)'
+          await session.send('⏳ 正在抓取页面，请稍候...')
+          // 调用通用测试函数
+          return await runTestSubscription(url, arg, author, options.title || '网页监控测试')
+        }
+
+        // 入库逻辑
+        const rssList = await ctx.database.get(('rssOwl' as any), { platform, guildId })
+
+        // 查重 (URL + selector 相同才算重复)
+        if (config.basic.urlDeduplication) {
+          const exists = rssList.find(i => i.url === url && i.arg?.selector === options.selector)
+          if (exists) return '已存在相同的网页监控订阅。'
+        }
+
+        // 获取初始数据
+        let initialItems = []
+        try {
+          initialItems = await getRssData(url, arg)
+        } catch (e) {
+          return `无法访问目标网页: ${e.message}`
+        }
+
+        if (initialItems.length === 0) {
+          return '警告：当前选择器未匹配到任何内容，订阅可能无效。建议先使用 -T 测试。'
+        }
+
+        const subscribe = {
+          url,
+          platform,
+          guildId,
+          author,
+          rssId: (+rssList.slice(-1)?.[0]?.rssId || 0) + 1,
+          arg: { ...arg, title: undefined }, // 存入 type='html' 和 selector
+          lastContent: {
+            itemArray: config.basic.resendUpdataContent === 'all'
+              ? initialItems.map(getLastContent)
+              : [getLastContent(initialItems[0])]
+          },
+          title: options.title || initialItems[0]?.rss?.channel?.title || 'Web Monitor',
+          lastPubDate: new Date(),
+          followers: []
+        }
+
+        await ctx.database.create(('rssOwl' as any), subscribe)
+        return `网页监控添加成功！\n标题: ${subscribe.title}\n选择器: ${options.selector}`
+      })
+
+    // --- rsso.ask: AI 智能订阅 ---
+    ctx.guild()
+      .command('rssowl.ask <url:string> <instruction:text>', 'AI 智能订阅网页')
+      .alias('rsso.ask')
+      .usage('例如: rsso.ask https://news.ycombinator.com "监控首页的前5条新闻标题"')
+      .option('puppeteer', '-P 使用动态渲染 (SPA网页)')
+      .option('test', '-T 测试模式 (只分析不订阅)')
+      .action(async ({ session, options }, url, instruction) => {
+        if (!url) return '请输入网址'
+
+        // 1. 自动补全 URL 协议
+        url = ensureUrlProtocol(url)
+
+        const modeText = options.puppeteer ? 'Puppeteer 动态渲染' : 'Static 静态抓取'
+        await session.send(`🔍 正在分析网页: ${url}\n(模式: ${modeText})`)
+
+        // 2. 抓取网页内容
+        let html = ''
+        try {
+          if (options.puppeteer) {
+            if (!ctx.puppeteer) return '❌ 未安装 puppeteer 插件，无法使用动态渲染模式'
+
+            const page = await ctx.puppeteer.page()
+            try {
+              await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+              await page.setViewport({ width: 1920, height: 1080 })
+              await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+              await new Promise(r => setTimeout(r, 3000)) // 等待 JS 加载
+              html = await page.content()
+            } catch (err) {
+              throw new Error(`Puppeteer 访问失败: ${err.message}`)
+            } finally {
+              try { await page.close() } catch (e) { /* 忽略页面已关闭的错误 */ }
+            }
+          } else {
+            // 静态模式 (Axios)
+            try {
+              const res = await $http(url, { timeout: 30000 })
+              html = res.data
+            } catch (err) {
+              // 区分 404 错误
+              if (err.response?.status === 404) {
+                throw new Error(`目标网页返回 404 Not Found。\n请检查网址是否正确，或尝试使用 -P 参数启用浏览器渲染。`)
+              }
+              throw new Error(`请求目标网页失败: ${err.message}`)
+            }
+          }
+        } catch (e) {
+          debug(e, 'Fetch Error', 'error')
+          return `❌ 网页抓取失败: ${e.message}\n\n💡 建议:\n1. 检查网址是否正确\n2. 如果是动态网页或有反爬，请加上 -P 参数`
+        }
+
+        // 3. 调用 AI 生成 Selector
+        let aiSelector = ''
+        try {
+          aiSelector = await generateSelectorByAI(url, instruction, html)
+        } catch (e) {
+          // 检查是否是 AI 接口 404
+          if (e.message.includes('404')) {
+            return `❌ AI 接口请求失败 (404)。\n请检查配置中的 ai.baseUrl 是否正确 (例如: https://api.openai.com/v1)`
+          }
+          return `❌ AI 分析失败: ${e.message}`
+        }
+
+        if (!aiSelector) return 'AI 未能生成有效的选择器，请尝试更详细的描述。'
+
+        // --- 测试模式: 只分析不订阅 ---
+        if (options.test) {
+          const { id: author } = session.event.user as any
+
+          // 构造完整的 arg，包含 AI 生成的选择器
+          const testArg: rssArg = {
+            type: 'html',
+            selector: aiSelector,
+            mode: options.puppeteer ? 'puppeteer' : 'static',
+            waitFor: options.puppeteer ? 3000 : 0,
+            template: 'content',
+            timeout: config.basic.timeout
+          }
+
+          // 先提示用户 AI 的结果
+          await session.send(`✅ AI 分析完成！\n🔧 生成选择器: ${aiSelector}\n⏳ 正在生成预览...`)
+
+          // 调用通用测试函数
+          return await runTestSubscription(url, testArg, author, `AI监控: ${instruction}`)
+        }
+
+        // 3. 验证选择器
+        const { id: guildId } = session.event.guild as any
+        const { platform } = session.event as any
+        const { id: author } = session.event.user as any
+        const rssList = await ctx.database.get(('rssOwl' as any), { platform, guildId })
+
+        const finalArg: rssArg = {
+          type: 'html',
+          selector: aiSelector,
+          mode: options.puppeteer ? 'puppeteer' : 'static',
+          waitFor: options.puppeteer ? 3000 : 0,
+          template: 'content',
+          timeout: config.basic.timeout,
+        }
+
+        try {
+          const items = await getRssData(url, finalArg)
+          if (items.length === 0) throw new Error('生成的选择器未匹配到内容')
+        } catch (e) {
+          return `AI 生成的选择器 (${aiSelector}) 验证失败，请重试或手动指定。`
+        }
+
+        // 4. 创建订阅
+        const subscribe = {
+          url,
+          platform,
+          guildId,
+          author,
+          rssId: (+rssList.slice(-1)?.[0]?.rssId || 0) + 1,
+          arg: finalArg,
+          lastContent: { itemArray: [] },
+          title: `AI监控: ${instruction}`,
+          lastPubDate: new Date(),
+          followers: []
+        }
+
+        await ctx.database.create(('rssOwl' as any), subscribe)
+        return `✅ 智能订阅成功！\n🎯 目标: ${instruction}\n🔧 AI生成的选择器: ${aiSelector}`
+      })
+
+    // --- rsso.watch: 简单网页监控 (关键词/整页) ---
+    ctx.guild()
+      .command('rssowl.watch <url:string> [keyword:text]', '简单网页监控')
+      .alias('rsso.watch')
+      .usage(`
+      简单网页监控，无需选择器。
+      示例:
+        rsso.watch https://example.com                    - 监控整页变化
+        rsso.watch https://example.com "缺货"             - 监控包含关键词的内容
+        rsso.watch https://example.com "缺货" -P          - SPA 动态页面
+        rsso.watch https://example.com "缺货" -T          - 测试模式 (只预览不订阅)
+      `)
+      .option('spa', '-P 监控动态网页(SPA)')
+      .option('test', '-T 测试模式 (只预览不订阅)')
+      .action(async ({ session, options }, url, keyword) => {
+        if (!url) return '请输入 URL'
+
+        // 自动补全 URL 协议
+        url = ensureUrlProtocol(url)
+
+        const { id: guildId } = session.event.guild as any
+        const { platform } = session.event as any
+        const { id: author } = session.event.user as any
+        const rssList = await ctx.database.get(('rssOwl' as any), { platform, guildId })
+
+        // 构造选择器：有关键词用 contains，无关键词监控整页 body
+        let selector = 'body'
+        if (keyword) {
+          selector = `body:contains('${keyword}')`
+        }
+
+        const arg: rssArg = {
+          type: 'html',
+          selector: selector,
+          mode: options.spa ? 'puppeteer' : 'static',
+          textOnly: true,
+          waitFor: options.spa ? 5000 : 0,
+          template: 'content',
+          timeout: config.basic.timeout,
+        }
+
+        // --- 测试模式: 只预览不订阅 ---
+        if (options.test) {
+          await session.send(`⏳ 正在测试监控... \n模式: ${options.spa ? 'Puppeteer' : 'Static'}\n关键词: ${keyword || '无 (整页监控)'}`)
+          // 调用通用测试函数
+          return await runTestSubscription(url, arg, author, keyword ? `监控: ${keyword}` : '整页变化监控')
+        }
+
+        // 查重
+        if (config.basic.urlDeduplication) {
+          const exists = rssList.find(i => i.url === url && i.arg?.selector === selector)
+          if (exists) return '已存在相同的网页监控订阅。'
+        }
+
+        // 验证
+        try {
+          const items = await getRssData(url, arg)
+          if (items.length === 0) {
+            return keyword
+              ? `❌ 未找到包含关键词 "${keyword}" 的内容`
+              : `❌ 无法抓取页面内容，请检查 URL 是否正确，或尝试使用 -P 选项`
+          }
+        } catch (e) {
+          return `❌ 验证失败: ${e.message}\n\n💡 建议: 如果是动态网页，请加上 -P 参数`
+        }
+
+        const subscribe = {
+          url,
+          platform,
+          guildId,
+          author,
+          rssId: (+rssList.slice(-1)?.[0]?.rssId || 0) + 1,
+          arg: arg,
+          lastContent: { itemArray: [] },
+          title: keyword ? `监控: ${keyword}` : '整页变化监控',
+          lastPubDate: new Date(),
+          followers: []
+        }
+
+        await ctx.database.create(('rssOwl' as any), subscribe)
+        return `✅ 监控添加成功！\n${keyword ? `🔍 关键词: ${keyword}` : '📄 监控整页变化'}\n🌐 ${url}`
+      })
 }
