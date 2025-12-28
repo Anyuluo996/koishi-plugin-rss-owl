@@ -41,6 +41,7 @@ interface Config {
   template?: TemplateConfig
   net?: NetConfig
   msg?: MsgConfig
+  ai?: AiConfig
   debug?: "disable"|"error"|"info"|"details"
 }
 const debugLevel = ["disable","error","info","details"]
@@ -87,6 +88,18 @@ interface MsgConfig {
   keywordBlock?: Array<string>
   blockString?:string
   rssHubUrl?:string
+}
+
+interface AiConfig {
+  enabled?: boolean
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+  placement?: 'top' | 'bottom'
+  separator?: string
+  prompt?: string
+  maxInputLength?: number
+  timeout?: number
 }
 
 interface proxyAgent {
@@ -256,6 +269,17 @@ export const Config = Schema.object({
     blockString:Schema.string().description('关键字屏蔽替换内容').default('*'),
     censor: Schema.boolean().description('消息审查，需要censor服务').default(false),
   }).description('消息处理'),
+  ai: Schema.object({
+    enabled: Schema.boolean().description('开启 AI 摘要生成').default(false),
+    baseUrl: Schema.string().role('link').description('API Base URL (例如: https://api.openai.com/v1)').default('https://api.openai.com/v1'),
+    apiKey: Schema.string().role('secret').description('API Key').required(),
+    model: Schema.string().description('使用的模型名称').default('gpt-3.5-turbo'),
+    placement: Schema.union(['top', 'bottom']).description('摘要位置（仅在模板未显式包含 {{aiSummary}} 时生效）').default('top'),
+    separator: Schema.string().description('摘要与正文的分割线').default('----------------'),
+    prompt: Schema.string().role('textarea').description('提示词 ({{title}} 代表标题, {{content}} 代表内容)').default('请简要总结以下新闻/文章的核心内容，要求语言简洁流畅：\n标题：{{title}}\n内容：{{content}}'),
+    maxInputLength: Schema.number().description('发送给 AI 的最大字数限制').default(2000),
+    timeout: Schema.number().description('AI 请求超时时间(毫秒)').default(30000),
+  }).description('AI 摘要设置'),
   // customUrlEnable:Schema.boolean().description('开发中：允许使用自定义规则对网页进行提取，用于对非RSS链接抓取').default(false).experimental(),
   debug: Schema.union(debugLevel).default(debugLevel[0]),
 })
@@ -308,6 +332,71 @@ export function apply(ctx: Context, config: Config) {
       return new Date(0)
     }
   }
+  const getAiSummary = async (title: string, contentHtml: string) => {
+    if (!config.ai.enabled || !config.ai.apiKey) return ''
+
+    // 1. 清洗内容，只保留纯文本
+    const $ = cheerio.load(contentHtml || '')
+    // 移除脚本、样式、图片等无关标签，减少 token 消耗
+    $('script').remove()
+    $('style').remove()
+    $('img').remove()
+    $('video').remove()
+    let plainText = $.text().replace(/\s+/g, ' ').trim()
+
+    // 2. 截断超长文本
+    if (plainText.length > config.ai.maxInputLength) {
+      plainText = plainText.substring(0, config.ai.maxInputLength) + '...'
+    }
+
+    if (!plainText || plainText.length < 50) return '' // 内容太少不总结
+
+    // 3. 构建 Prompt
+    const prompt = config.ai.prompt
+      .replace('{{title}}', title || '')
+      .replace('{{content}}', plainText)
+
+    try {
+      debug(`正在生成摘要: ${title}`, 'AI', 'info')
+
+      // 4. 构建请求配置（支持代理）
+      const requestConfig: any = {
+        headers: {
+          'Authorization': `Bearer ${config.ai.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: config.ai.timeout,
+      }
+
+      // 复用代理配置
+      if (config.net.proxyAgent?.enabled) {
+        const proxyUrl = `${config.net.proxyAgent.protocol}://${config.net.proxyAgent.host}:${config.net.proxyAgent.port}`
+        requestConfig.httpsAgent = new HttpsProxyAgent(proxyUrl)
+        requestConfig.proxy = false
+      }
+
+      // 5. 发送请求
+      const response = await axios.post(
+        `${config.ai.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+        {
+          model: config.ai.model,
+          messages: [
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.7
+        },
+        requestConfig
+      )
+
+      const summary = response.data?.choices?.[0]?.message?.content?.trim()
+      debug(`摘要生成成功: ${summary?.substring(0, 20)}...`, 'AI', 'details')
+      return summary || ''
+    } catch (error) {
+      debug(`AI 摘要生成失败: ${error.message}`, 'AI', 'error')
+      return ''
+    }
+  }
+
   const getImageUrl = async (url, arg,useBase64Mode=false) => {
     debug('imgUrl:'+url,'','details')
     if(!url)return ''
@@ -701,65 +790,122 @@ export function apply(ctx: Context, config: Config) {
     try {
       const res = await $http(url, config)
       let rssData = res.data
-      const rssJson = x2js.xml2js(rssData)
-      // ... 保持原有的解析逻辑 ...
-      let parseContent = (content,attr=undefined)=>{
-        debug(content,'parseContent')
-        if(!content)return undefined
-        if(typeof content =='string')return content
-        if(attr&&content?.[attr])return parseContent(content?.[attr])
-        if(content['__cdata'])return content['__cdata']?.join?.("")||content['__cdata']
-        if(content['__text'])return content['__text']?.join?.("")||content['__text']
-        // debug(content,'未知ATOM订阅的content格式，请联系插件作者更新','info')
-        if(Object.prototype.toString.call(content)==='[object Array]'){
-          return parseContent(content[0],attr)
-        }else if(Object.prototype.toString.call(content)==='[object Object]'){
-          return Object.values(content).reduce((t:string,v:any)=>{
-            if(v&&(typeof v =='string'||v?.join)){
-              let text:string = v?.join("")||v
+      const contentType = res.headers['content-type'] || ''
+
+      // 定义通用内容清洗函数 (保持原逻辑)
+      let parseContent = (content, attr = undefined) => {
+        debug(content, 'parseContent')
+        if (!content) return undefined
+        if (typeof content == 'string') return content
+        if (attr && content?.[attr]) return parseContent(content?.[attr])
+        if (content['__cdata']) return content['__cdata']?.join?.("") || content['__cdata']
+        if (content['__text']) return content['__text']?.join?.("") || content['__text']
+
+        if (Object.prototype.toString.call(content) === '[object Array]') {
+          return parseContent(content[0], attr)
+        } else if (Object.prototype.toString.call(content) === '[object Object]') {
+          return Object.values(content).reduce((t: string, v: any) => {
+            if (v && (typeof v == 'string' || v?.join)) {
+              let text: string = v?.join("") || v
               return text.length > t.length ? text : t
-            }else{return t}
-          },'')
-        }else{
+            } else { return t }
+          }, '')
+        } else {
           return content
         }
       }
-      if(rssJson.rss){
-        //rss
+
+      // --- 新增：JSON 格式处理逻辑 (支持 ?format=json 等) ---
+      let isJson = false;
+      if (typeof rssData === 'object' && rssData !== null) {
+        isJson = true;
+      } else if (typeof rssData === 'string' && (rssData.trim().startsWith('{') || contentType.includes('json'))) {
+        try {
+          rssData = JSON.parse(rssData);
+          isJson = true;
+        } catch (e) { /* ignore */ }
+      }
+
+      if (isJson) {
+        debug(rssData, 'JSON Feed Response', 'details');
+
+        // 构造兼容 XML 结构的父级对象，以便模板使用 {{rss.channel.title}}
+        const rssMock = {
+          channel: {
+            title: rssData.title || 'Unknown Title',
+            description: rssData.description || rssData.home_page_url || '',
+            link: rssData.home_page_url || url,
+            image: { url: rssData.icon || rssData.favicon || '' }
+          }
+        };
+
+        let items = [];
+        // 标准 JSON Feed (v1/v1.1) 使用 'items'
+        if (Array.isArray(rssData.items)) {
+          items = rssData.items.map(item => ({
+            title: item.title || '',
+            // JSON Feed 优先使用 content_html，其次 content_text
+            description: item.content_html || item.content_text || item.summary || '',
+            link: item.url || item.id,
+            guid: item.id || item.url,
+            pubDate: item.date_published || item.date_modified,
+            author: item.author?.name || rssData.author?.name || '',
+            rss: rssMock // 注入父级引用
+          }));
+        }
+        // 兼容 RSSHub ?format=debug.json 或其他类 JSON 结构
+        else if (rssData.objects && Array.isArray(rssData.objects)) {
+          // 针对 RSS3 UMS 或部分特定结构尝试解析
+          items = rssData.objects.map(item => ({
+             title: item.title || item.type || 'No Title',
+             description: item.content || item.summary || JSON.stringify(item),
+             link: item.link || item.url || url,
+             guid: item.id || item.hash,
+             pubDate: item.date_published || item.created_at || item.timestamp,
+             rss: rssMock
+          }));
+        }
+
+        debug(items[0], 'Parsed JSON Item', 'details');
+        return items;
+      }
+      // --- JSON 处理结束 ---
+
+      // --- 原有 XML 处理逻辑 ---
+      const rssJson = x2js.xml2js(rssData)
+
+      if (rssJson.rss) {
+        // RSS 2.0
         rssJson.rss.channel.item = [rssJson.rss.channel.item].flat(Infinity)
-        const rssItemList = rssJson.rss.channel.item.map(i => ({ ...i,guid:parseContent(i?.guid), rss: rssJson.rss }))
+        const rssItemList = rssJson.rss.channel.item.map(i => ({ ...i, guid: parseContent(i?.guid), rss: rssJson.rss }))
         return rssItemList
-      }else if(rssJson.feed){
-        //atom
-        let rss = {channel:{}}
-        let item = rssJson.feed.entry.map(i=>({
+      } else if (rssJson.feed) {
+        // Atom
+        let rss = { channel: {} }
+        let item = rssJson.feed.entry.map(i => ({
           ...i,
-          title:parseContent(i.title),
-          description:parseContent(i.content),
-          link:parseContent(i.link,'_href'),
-          guid:parseContent(i.id),
-          pubDate:parseContent(i.updated),
-          author:parseContent(i.author,'name'),
-          // category:i,
-          // comments:i,
-          // enclosure:i,
-          // source:i,
+          title: parseContent(i.title),
+          description: parseContent(i.content),
+          link: parseContent(i.link, '_href'),
+          guid: parseContent(i.id),
+          pubDate: parseContent(i.updated),
+          author: parseContent(i.author, 'name'),
         }))
         rss.channel = {
-          title:rssJson.feed.title,
-          link:rssJson.feed.link?.[0]?.href||rssJson.feed.link?.href,
-          description:rssJson.feed.summary,
-          generator:rssJson.feed.generator,
-          // webMaster:undefined,
-          language:rssJson.feed['@xml:lang'],
+          title: rssJson.feed.title,
+          link: rssJson.feed.link?.[0]?.href || rssJson.feed.link?.href,
+          description: rssJson.feed.summary,
+          generator: rssJson.feed.generator,
+          language: rssJson.feed['@xml:lang'],
           item
         }
-        item = item.map(i=>({rss,...i}))
-        debug(item,'atom item','details')
-        debug(item[0],'atom item2','details')
+        item = item.map(i => ({ rss, ...i }))
+        debug(item, 'atom item', 'details')
         return item
-      }else{
-        debug(rssJson,'未知rss格式，请提交issue','error')
+      } else {
+        debug(rssJson, '未知rss格式，请提交issue', 'error')
+        // 如果解析失败返回空数组，避免 crash
+        return []
       }
     } catch (error) {
       debug(`Failed to fetch RSS from ${url}`, '', 'error')
@@ -774,6 +920,28 @@ export function apply(ctx: Context, config: Config) {
     let videoList = [];
     item.description = item.description?.join?.('') || item.description;
 
+    // --- AI 逻辑 START ---
+    let aiSummary = "";
+    let formattedAiSummary = "";
+    const hasCustomAiTemplate = config.template?.custom?.includes('{{aiSummary}}') ||
+                                 config.template?.content?.includes('{{aiSummary}}');
+
+    if (config.ai && config.ai.enabled) {
+      const rawSummary = await getAiSummary(item.title, item.description);
+
+      if (rawSummary) {
+        const prefix = "🤖 AI摘要：\n";
+        const sep = config.ai.separator || '----------------';
+
+        // 带格式的摘要文本
+        formattedAiSummary = `${prefix}${rawSummary}`;
+
+        // 注入模板变量的纯文本
+        aiSummary = rawSummary;
+      }
+    }
+    // --- AI 逻辑 END ---
+
     //block
     arg.block?.forEach(blockWord => {
       item.description = item.description.replace(new RegExp(blockWord, 'gim'), i => Array(i.length).fill(config.msg.blockString).join(""));
@@ -782,7 +950,7 @@ export function apply(ctx: Context, config: Config) {
 
     debug(template, 'template');
     // 通用内容解析
-    const parseContent = (template: string, item: any) => template.replace(/{{(.+?)}}/g, (i: string) => i.match(/^{{(.*)}}$/)[1].split("|").reduce((t: any, v: string) => t || v.match(/^'(.*)'$/)?.[1] || v.split(".").reduce((t: any, v: string) => new RegExp("Date").test(v) ? new Date(t?.[v]).toLocaleString('zh-CN') : t?.[v] || "", item), ''));
+    const parseContent = (template: string, item: any) => template.replace(/{{(.+?)}}/g, (i: string) => i.match(/^{{(.*)}}$/)[1].split("|").reduce((t: any, v: string) => t || v.match(/^'(.*)'$/)?.[1] || v.split(".").reduce((t: any, v: string) => new RegExp("Date").test(v) ? new Date(t?.[v]).toLocaleString('zh-CN') : t?.[v] || "", { ...item, aiSummary }), ''));
 
     if (config.basic.videoMode === 'filter') {
       html = cheerio.load(item.description);
@@ -939,6 +1107,21 @@ export function apply(ctx: Context, config: Config) {
     if (config.msg.censor) {
       msg = `<censor>${msg}</censor>`;
     }
+
+    // --- AI 自动拼接逻辑 START ---
+    // 如果生成了摘要，且用户使用的模板里没有显式包含 {{aiSummary}}，则自动拼接
+    if (formattedAiSummary && !hasCustomAiTemplate && config.ai) {
+      const sep = config.ai.separator || '----------------';
+      if (config.ai.placement === 'bottom') {
+        // 底部：正文 + 分割线 + 摘要
+        msg = msg + `\n${sep}\n` + formattedAiSummary;
+      } else {
+        // 顶部：摘要 + 分割线 + 正文
+        msg = formattedAiSummary + `\n${sep}\n` + msg;
+      }
+    }
+    // --- AI 自动拼接逻辑 END ---
+
     debug(msg, "parse:msg", 'info');
     return msg;
   }
