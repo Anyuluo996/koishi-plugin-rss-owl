@@ -1,6 +1,8 @@
 lib
 dist
 external
+claud
+.claude/
 
 node_modules
 cache

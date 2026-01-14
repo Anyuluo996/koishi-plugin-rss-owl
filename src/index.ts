@@ -72,6 +72,7 @@ interface TemplateConfig {
   bodyWidth?: number
   bodyPadding?: number
   bodyFontSize?: number
+  deviceScaleFactor?: number
   content?: string
   custom?: string
   customTemplate:any[]
@@ -271,6 +272,7 @@ export const Config = Schema.object({
     bodyWidth: Schema.number().description('puppeteer图片的宽度(px)，较低的值可能导致排版错误，仅在非custom的模板生效').default(600),
     bodyPadding: Schema.number().description('puppeteer图片的内边距(px)仅在非custom的模板生效').default(20),
     bodyFontSize: Schema.number().description('puppeteer图片的字号(px)，0为默认值，仅在非custom的模板生效').default(0),
+    deviceScaleFactor: Schema.union([0.5, 1, 1.5, 2, 3]).description('截图清晰度倍数，越大越清晰但文件也越大').default(1),
     content: Schema.string().role('textarea', { rows: [4, 2] }).default(`《{{title}}》\n{{description}}`).description('content模板的内容，使用插值载入推送内容'),
     custom: Schema.string().role('textarea', { rows: [4, 2] }).default(`<body style="width:600px;padding:20px;background:#F5ECCD;">
       <div style="display: flex;flex-direction: column;">
@@ -354,12 +356,183 @@ export function apply(ctx: Context, config: Config) {
     autoInc: true
   }
   )
-  const getDefaultTemplate = (bodyWidth, bodyPadding,bodyFontSize:number|undefined) => 
-    `<body><h3>{{title}}</h3><h5>{{pubDate}}</h5><br><div>{{description}}<div></body>
-    <style>*{${bodyFontSize?`font-size: ${bodyFontSize}px !important;`:''}body{width:${bodyWidth || config.template.bodyWidth}px;padding:${bodyPadding || config.template.bodyPadding}px;}}</style>`
-  const getDescriptionTemplate = (bodyWidth, bodyPadding,bodyFontSize:number|undefined) => 
-    `<body>{{description}}</body>
-    <style>*{${bodyFontSize?`font-size: ${bodyFontSize}px !important;`:''}body{width:${bodyWidth || config.template.bodyWidth}px;padding:${bodyPadding || config.template.bodyPadding}px;}}</style>`
+  const getDefaultTemplate = (bodyWidth, bodyPadding,bodyFontSize:number|undefined) =>
+    `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>{{title}}</title>
+<!-- 引入 Tailwind CSS 和 Typography 插件 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+    theme: {
+        extend: {
+        colors: {
+            primary: "#3B82F6",
+            "background-light": "#F8FAFC",
+        },
+        fontFamily: {
+            display: ["Inter", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"],
+        },
+        },
+    },
+    };
+</script>
+<style>
+    body {
+        margin: 0;
+        /* 根据配置设置宽度和内边距 */
+        width: ${bodyWidth || config.template.bodyWidth}px;
+        padding: ${bodyPadding || config.template.bodyPadding}px;
+        box-sizing: border-box;
+        font-family: 'Inter', sans-serif;
+        background-color: #F8FAFC;
+    }
+
+    /* 针对 RSS 内容 (HTML) 的样式修正 */
+    .prose {
+        max-width: none;
+        color: #475569; /* slate-600 */
+        ${bodyFontSize ? `font-size: ${bodyFontSize}px;` : ''}
+    }
+    .prose img {
+        border-radius: 8px;
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+        max-width: 100%;
+        height: auto;
+    }
+    .prose a {
+        color: #3B82F6;
+        text-decoration: none;
+    }
+    .prose p {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+        line-height: 1.6;
+    }
+</style>
+</head>
+<body>
+    <!-- 外部容器 -->
+    <div class="relative group w-full">
+        <!-- 背景光晕效果 -->
+        <div class="absolute -inset-1 bg-gradient-to-r from-primary to-cyan-400 rounded-2xl blur opacity-10"></div>
+
+        <!-- 卡片主体 -->
+        <div class="relative bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+            <!-- 左侧装饰条 -->
+            <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-primary"></div>
+
+            <!-- 右上角标签 (可选) -->
+            <div class="absolute top-4 right-4 flex gap-2">
+                <span class="px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-slate-100 text-slate-500 border border-slate-200 rounded">
+                    {{rss.channel.title}}
+                </span>
+            </div>
+
+            <div class="p-8">
+                <!-- 头部信息 -->
+                <div class="mb-6">
+                    <div class="flex items-start gap-3 mb-2">
+                        <div class="mt-1 w-8 h-8 rounded-lg bg-primary/10 flex flex-shrink-0 items-center justify-center overflow-hidden">
+                            <!-- RSS Feed Icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-primary">
+                                <path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9zM4 18c0 1.1.9 2 2 2 2s2-.9 2-2-.9-2-2-2-2 .9-2 2z"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-xl font-bold text-slate-800 leading-tight">{{title}}</h2>
+                    </div>
+                    <div class="flex items-center text-slate-400 text-xs font-medium pl-11">
+                        <!-- Calendar SVG Icon -->
+                        <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="4" width="18" height="18" rx="2" stroke="#94A3B8" stroke-width="2"/>
+                            <path d="M16 2v4M8 2v4" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+                            <path d="M3 10h18" stroke="#94A3B8" stroke-width="2"/>
+                        </svg>
+                        {{pubDate}}
+                    </div>
+                </div>
+
+                <!-- 内容区域 (使用 prose 类处理 HTML 内容) -->
+                <div class="pl-11 prose prose-slate">
+                    {{description}}
+                </div>
+
+                <!-- 底部信息 -->
+                <div class="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center text-xs text-slate-400 pl-11">
+                        <!-- Link SVG Icon -->
+                        <svg class="w-3.5 h-3.5 mr-1.5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        From: <span class="ml-1 text-primary font-mono">{{rss.channel.description}}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 角落装饰 -->
+            <div class="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-primary/20 rounded-tl-lg"></div>
+            <div class="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-primary/20 rounded-br-lg"></div>
+        </div>
+    </div>
+</body>
+</html>`
+  const getDescriptionTemplate = (bodyWidth, bodyPadding,bodyFontSize:number|undefined) =>
+    `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<style>
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+}
+.card {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+    max-width: ${bodyWidth || config.template.bodyWidth}px;
+    width: 100%;
+    overflow: hidden;
+}
+.card-content {
+    padding: ${bodyPadding || config.template.bodyPadding}px;
+    color: #2d3748;
+    line-height: 1.7;
+    ${bodyFontSize ? `font-size: ${bodyFontSize}px;` : ''}
+}
+.card-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 12px 0;
+}
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="card-content">{{description}}</div>
+</div>
+</body>
+</html>`
   let interval
   const debug = (message,name='',type:"disable"|"error"|"info"|"details"='details') =>{
     const typeLevel = debugLevel.findIndex(i=>i==type)
@@ -604,15 +777,27 @@ export function apply(ctx: Context, config: Config) {
     }
   }
   const puppeteerToFile = async (puppeteer: string) => {
+    // puppeteer.render() 返回 Element 字符串，格式如: <img src="data:image/png;base64,..."/>
+    // 提取 base64 数据
     let base64 = /(?<=src=").+?(?=")/.exec(puppeteer)?.[0]
-    if (!base64) return puppeteer
+    if (!base64) {
+      debug(`puppeteer render 返回值格式异常: ${puppeteer}`, 'puppeteerToFile', 'error');
+      return puppeteer;
+    }
+
+    // 检查 base64 格式是否正确（应该包含 data:image 前缀）
+    if (!base64.startsWith('data:')) {
+      debug(`提取的 src 不是 base64 格式: ${base64}`, 'puppeteerToFile', 'error');
+      // 可能是网络图片 URL，直接返回原 Element
+      return puppeteer;
+    }
+
     const buffer = Buffer.from(base64.substring(base64.indexOf(',') + 1), 'base64');
 
     // assets 模式
     if (config.basic.imageMode === 'assets' && ctx.assets) {
       try {
-        // ★★★ 修复点：直接传递 base64 字符串给 upload，不要转 Buffer ★★★
-        // base64 变量本身就是 "data:image/png;base64,..." 格式
+        // 直接传递 base64 字符串给 upload
         const url = await ctx.assets.upload(base64, `rss-screenshot-${Date.now()}.png`)
         debug(`截图 Assets 上传成功: ${url}`, 'assets', 'info')
         return `<img src="${url}"/>`
@@ -622,8 +807,9 @@ export function apply(ctx: Context, config: Config) {
       }
     }
 
+    // File 模式：转换为 <file src="..."/> 格式
     const MB = buffer.length / 1e+6
-    debug("MB: " + MB,'file size','details');
+    debug("puppeteer 渲染图片大小: " + MB + ' MB', 'file size', 'details');
     return `<file src="${await writeCacheFile(base64)}"/>`
   }
   const quickList = [
@@ -808,11 +994,128 @@ export function apply(ctx: Context, config: Config) {
     return requestManager.enqueue(makeRequest)
   }
 
-  const renderHtml2Image = async (htmlContent:string)=>{
+  // 预处理 HTML：下载所有图片并替换为 data URL，避免 Puppeteer 截图时加载外部图片超时
+  const preprocessHtmlImages = async (htmlContent: string, arg?: rssArg): Promise<string> => {
+    const $ = cheerio.load(htmlContent)
+    const imgElements = $('img')
+    const videoElements = $('video')
+
+    const totalCount = imgElements.length + videoElements.length
+    if (totalCount === 0) {
+      return htmlContent
+    }
+
+    debug(`开始预处理 ${imgElements.length} 张图片和 ${videoElements.length} 个视频封面`, 'preprocess', 'info')
+
+    // 使用 Promise.allSettled 而不是 Promise.all，确保单个图片失败不影响其他图片
+    const imgResults = await Promise.allSettled(imgElements.map(async (_, i) => {
+      const originalSrc = $(i).attr('src')
+      if (!originalSrc || originalSrc.startsWith('data:')) {
+        return { index: i, success: true, skipped: true }
+      }
+
+      try {
+        // 使用 useBase64Mode=true 确保返回 data URL，设置 10 秒超时
+        const dataUrl = await Promise.race([
+          getImageUrl(originalSrc, arg, true),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('图片下载超时')), 10000)
+          )
+        ])
+        if (dataUrl) {
+          $(i).attr('src', dataUrl)
+          debug(`图片替换成功: ${originalSrc.substring(0, 50)}...`, 'preprocess', 'details')
+          return { index: i, success: true, src: originalSrc }
+        } else {
+          debug(`图片下载失败，保留原链接: ${originalSrc}`, 'preprocess', 'error')
+          return { index: i, success: false, src: originalSrc }
+        }
+      } catch (error) {
+        debug(`图片处理失败: ${error}`, 'preprocess', 'error')
+        return { index: i, success: false, src: originalSrc }
+      }
+    }))
+
+    // 统计图片处理结果
+    const successCount = imgResults.filter(r => r.status === 'fulfilled' && r.value.success).length
+    const failCount = imgResults.length - successCount
+    if (failCount > 0) {
+      debug(`${failCount} 张图片下载失败，将使用原链接`, 'preprocess', 'error')
+    }
+
+    // 使用 Promise.allSettled 处理视频封面
+    const videoResults = await Promise.allSettled(videoElements.map(async (_, i) => {
+      const poster = $(i).attr('poster')
+      if (!poster || poster.startsWith('data:')) {
+        return { index: i, success: true, skipped: true }
+      }
+
+      try {
+        // 设置 10 秒超时
+        const dataUrl = await Promise.race([
+          getImageUrl(poster, arg, true),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('视频封面下载超时')), 10000)
+          )
+        ])
+        if (dataUrl) {
+          $(i).attr('poster', dataUrl)
+          debug(`视频封面替换成功: ${poster.substring(0, 50)}...`, 'preprocess', 'details')
+          return { index: i, success: true, src: poster }
+        } else {
+          debug(`视频封面下载失败，保留原链接: ${poster}`, 'preprocess', 'error')
+          return { index: i, success: false, src: poster }
+        }
+      } catch (error) {
+        debug(`视频封面处理失败: ${error}`, 'preprocess', 'error')
+        return { index: i, success: false, src: poster }
+      }
+    }))
+
+    // 统计视频封面处理结果
+    const videoSuccessCount = videoResults.filter(r => r.status === 'fulfilled' && r.value.success).length
+    const videoFailCount = videoResults.length - videoSuccessCount
+    if (videoFailCount > 0) {
+      debug(`${videoFailCount} 个视频封面下载失败，将使用原链接`, 'preprocess', 'error')
+    }
+
+    return $.html()
+  }
+
+  const renderHtml2Image = async (htmlContent:string, arg?: rssArg)=>{
     let page = await ctx.puppeteer.page()
     try {
       debug(htmlContent,'htmlContent','details')
-      await page.setContent(htmlContent)
+
+      // 预处理：下载所有图片并替换为 data URL，避免加载外部图片超时
+      htmlContent = await preprocessHtmlImages(htmlContent, arg)
+
+      // 设置 deviceScaleFactor 以控制截图清晰度（必须在 setContent 之前）
+      // 保持 viewport 宽度与 bodyWidth 匹配，避免排版错乱
+      const bodyWidth = config.template.bodyWidth || 600
+      const bodyPadding = config.template.bodyPadding || 20
+      const viewportWidth = bodyWidth + bodyPadding * 2 + 100  // 预留额外空间
+
+      await page.setViewport({
+        width: viewportWidth,
+        height: 1200,
+        deviceScaleFactor: config.template.deviceScaleFactor
+      })
+      debug(`设置截图清晰度: ${config.template.deviceScaleFactor}x, viewport: ${viewportWidth}x1200`, 'deviceScaleFactor', 'info')
+
+      // 拦截视频请求，避免加载视频导致超时
+      await page.setRequestInterception(true)
+      page.on('request', (req) => {
+        // 阻止视频和音频资源加载，只加载图片和样式
+        if (req.resourceType() === 'media') {
+          req.abort()
+        } else {
+          req.continue()
+        }
+      })
+
+      // 使用 domcontentloaded 避免等待视频等慢速资源
+      await page.setContent(htmlContent, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
       if(!config.basic.autoSplitImage) {
         const image = await page.screenshot({type:"png"})
@@ -1206,10 +1509,28 @@ export function apply(ctx: Context, config: Config) {
       }
       html('img').attr('style', 'object-fit:scale-down;max-width:100%;');
       if (config.basic.imageMode == 'base64') {
-        msg = (await renderHtml2Image(html.html())).toString();
-      } else if (config.basic.imageMode == 'File') {
-        msg = await ctx.puppeteer.render(html.html());
-        msg = await puppeteerToFile(msg);
+        msg = (await renderHtml2Image(html.html(), arg)).toString();
+      } else if (config.basic.imageMode == 'File' || config.basic.imageMode == 'assets') {
+        if (!ctx.puppeteer) {
+          debug('未安装 puppeteer 插件，跳过图片渲染', 'puppeteer error', 'error');
+          msg = html.html();
+        } else {
+          try {
+            // 预处理：下载所有图片并替换为 data URL
+            let processedHtml = await preprocessHtmlImages(html.html(), arg);
+            // 如果需要自定义 deviceScaleFactor，使用自定义渲染
+            if (config.template.deviceScaleFactor !== 1) {
+              msg = (await renderHtml2Image(processedHtml, arg)).toString();
+            } else {
+              msg = await ctx.puppeteer.render(processedHtml);
+            }
+            msg = await puppeteerToFile(msg);
+          } catch (error) {
+            debug(`puppeteer render 失败: ${error}`, 'puppeteer error', 'error');
+            // 降级：直接返回 HTML 文本
+            msg = html.html();
+          }
+        }
       }
       msg = parseContent(config.template.customRemark, { ...item, arg, description: msg });
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
@@ -1290,13 +1611,36 @@ export function apply(ctx: Context, config: Config) {
         await Promise.all(html('img').map(async (v: any, i: any) => i.attribs.src = await getImageUrl(i.attribs.src, arg, true)));
       }
       html('img').attr('style', 'object-fit:scale-down;max-width:100%;');
+      debug(`当前 imageMode: ${config.basic.imageMode}`, 'imageMode', 'info');
       if (config.basic.imageMode == 'base64') {
-        msg = (await renderHtml2Image(html.html())).toString();
-      } else if (config.basic.imageMode == 'File') {
-        msg = await ctx.puppeteer.render(html.html());
-        msg = await puppeteerToFile(msg);
+        debug('使用 base64 模式渲染', 'render mode', 'info');
+        msg = (await renderHtml2Image(html.html(), arg)).toString();
+      } else if (config.basic.imageMode == 'File' || config.basic.imageMode == 'assets') {
+        debug(`使用 ${config.basic.imageMode} 模式渲染`, 'render mode', 'info');
+        if (!ctx.puppeteer) {
+          debug('未安装 puppeteer 插件，跳过图片渲染', 'puppeteer error', 'error');
+          msg = html.html();
+        } else {
+          try {
+            debug('开始调用 puppeteer.render()', 'puppeteer', 'info');
+            // 预处理：下载所有图片并替换为 data URL，避免加载外部图片超时
+            let processedHtml = await preprocessHtmlImages(html.html(), arg);
+            // 如果需要自定义 deviceScaleFactor，使用自定义渲染
+            if (config.template.deviceScaleFactor !== 1) {
+              msg = (await renderHtml2Image(processedHtml, arg)).toString();
+            } else {
+              msg = await ctx.puppeteer.render(processedHtml);
+            }
+            debug(`puppeteer.render() 返回: ${msg.substring(0, 100)}...`, 'puppeteer result', 'info');
+            msg = await puppeteerToFile(msg);
+            debug(`puppeteerToFile 转换完成`, 'puppeteer', 'info');
+          } catch (error) {
+            debug(`puppeteer render 失败: ${error}`, 'puppeteer error', 'error');
+            // 降级：直接返回 HTML 文本
+            msg = html.html();
+          }
+        }
       }
-      if (config.basic.imageMode == 'File') msg = await puppeteerToFile(msg);
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
 
       // ★★★ 修复点：过滤掉没有 src 的视频 ★★★
@@ -1310,10 +1654,28 @@ export function apply(ctx: Context, config: Config) {
       }
       html('img').attr('style', 'object-fit:scale-down;max-width:100%;');
       if (config.basic.imageMode == 'base64') {
-        msg = (await renderHtml2Image(html.html())).toString();
-      } else if (config.basic.imageMode == 'File') {
-        msg = await ctx.puppeteer.render(html.html());
-        msg = await puppeteerToFile(msg);
+        msg = (await renderHtml2Image(html.html(), arg)).toString();
+      } else if (config.basic.imageMode == 'File' || config.basic.imageMode == 'assets') {
+        if (!ctx.puppeteer) {
+          debug('未安装 puppeteer 插件，跳过图片渲染', 'puppeteer error', 'error');
+          msg = html.html();
+        } else {
+          try {
+            // 预处理：下载所有图片并替换为 data URL
+            let processedHtml = await preprocessHtmlImages(html.html(), arg);
+            // 如果需要自定义 deviceScaleFactor，使用自定义渲染
+            if (config.template.deviceScaleFactor !== 1) {
+              msg = (await renderHtml2Image(processedHtml, arg)).toString();
+            } else {
+              msg = await ctx.puppeteer.render(processedHtml);
+            }
+            msg = await puppeteerToFile(msg);
+          } catch (error) {
+            debug(`puppeteer render 失败: ${error}`, 'puppeteer error', 'error');
+            // 降级：直接返回 HTML 文本
+            msg = html.html();
+          }
+        }
       }
       await Promise.all(html('video').map(async (v: any, i: any) => videoList.push([await getVideoUrl(i.attribs.src, arg, true, i), (i.attribs.poster && config.basic.usePoster) ? await getImageUrl(i.attribs.poster, arg, true) : ""])));
 
@@ -1331,10 +1693,28 @@ export function apply(ctx: Context, config: Config) {
       html2('img').attr('style', 'object-fit:scale-down;max-width:100%;');
       html2('body').attr('style', `width:${config.template.bodyWidth}px;padding:${config.template.bodyPadding}px;`);
       if (config.basic.imageMode == 'base64') {
-        msg = (await renderHtml2Image(html2.xml())).toString();
-      } else if (config.basic.imageMode == 'File') {
-        msg = await ctx.puppeteer.render(html2.xml());
-        msg = await puppeteerToFile(msg);
+        msg = (await renderHtml2Image(html2.xml(), arg)).toString();
+      } else if (config.basic.imageMode == 'File' || config.basic.imageMode == 'assets') {
+        if (!ctx.puppeteer) {
+          debug('未安装 puppeteer 插件，跳过图片渲染', 'puppeteer error', 'error');
+          msg = html2.xml();
+        } else {
+          try {
+            // 预处理：下载所有图片并替换为 data URL
+            let processedHtml = await preprocessHtmlImages(html2.xml(), arg);
+            // 如果需要自定义 deviceScaleFactor，使用自定义渲染
+            if (config.template.deviceScaleFactor !== 1) {
+              msg = (await renderHtml2Image(processedHtml, arg)).toString();
+            } else {
+              msg = await ctx.puppeteer.render(processedHtml);
+            }
+            msg = await puppeteerToFile(msg);
+          } catch (error) {
+            debug(`puppeteer render 失败: ${error}`, 'puppeteer error', 'error');
+            // 降级：直接返回 HTML 文本
+            msg = html2.xml();
+          }
+        }
       }
     }
 
