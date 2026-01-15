@@ -19,3 +19,5 @@ tsconfig.tsbuildinfo
 *.ntvs*
 *.njsproj
 *.sln
+src/index_old.ts
+src/index.ts.bak

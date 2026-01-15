@@ -1,7 +1,7 @@
 {
   "name": "@anyul/koishi-plugin-rss",
-  "description": "Koishi RSS订阅器，支持多种RSS源和代理配置",
-  "version": "4.8.16",
+  "description": "Koishi RSS订阅器，支持多种RSS源、图片渲染、AI摘要等高级功能",
+  "version": "5.0.0-beta",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "author": "Anyuluo <anyul@email.com>",
@@ -38,6 +38,7 @@
     "https-proxy-agent": "^7.0.6",
     "koishi": "^4.18.10",
     "koishi-plugin-puppeteer": "^3.9.0",
+    "marked": "^4.3.0",
     "x2js": "^3.4.4"
   },
   "devDependencies": {
