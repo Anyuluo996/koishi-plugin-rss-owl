@@ -75,7 +75,18 @@ export const getImageUrl = async (
   let res
   try {
     res = await $http(url, arg, { responseType: 'arraybuffer', timeout: 60000 })
-    debug(config, `图片下载成功，大小: ${(res.data.length / 1024).toFixed(2)} KB`, 'img download', 'details')
+
+    // 检查文件大小限制
+    const maxSize = (config.basic.maxImageSize || 30) * 1024 * 1024 // 转换为字节
+    const contentLength = res.data.length
+    const sizeMB = (contentLength / 1024 / 1024).toFixed(2)
+
+    if (contentLength > maxSize) {
+      debug(config, `图片文件过大 (${sizeMB} MB)，超过限制 ${config.basic.maxImageSize} MB，跳过该图片`, 'img size', 'info')
+      return ''
+    }
+
+    debug(config, `图片下载成功，大小: ${sizeMB} MB`, 'img download', 'details')
   } catch (error) {
     debug(config, `图片请求失败: ${error}`, 'img error', 'error')
     return ''
@@ -143,7 +154,18 @@ export const getVideoUrl = async (
   try {
     // 视频文件可能较大，增加超时时间到 120 秒
     res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 120000 })
-    debug(config, `视频下载成功，大小: ${(res.data.length / 1024 / 1024).toFixed(2)} MB`, 'video download', 'details')
+
+    // 检查文件大小限制
+    const maxSize = (config.basic.maxVideoSize || 30) * 1024 * 1024 // 转换为字节
+    const contentLength = res.data.length
+    const sizeMB = (contentLength / 1024 / 1024).toFixed(2)
+
+    if (contentLength > maxSize) {
+      debug(config, `视频文件过大 (${sizeMB} MB)，超过限制 ${config.basic.maxVideoSize} MB，跳过该视频`, 'video size', 'info')
+      return ''
+    }
+
+    debug(config, `视频下载成功，大小: ${sizeMB} MB`, 'video download', 'details')
   } catch (error) {
     debug(config, `视频请求失败: ${error}`, 'video error', 'error')
     return ''

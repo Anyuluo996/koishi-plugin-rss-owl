@@ -17,6 +17,8 @@ import { createHttpFunction, RequestManager } from './utils/fetcher'
 import { parsePubDate, ensureUrlProtocol, parseQuickUrl, parseTemplateContent, cleanContent } from './utils/common'
 import { getImageUrl, getVideoUrl, puppeteerToFile, writeCacheFile, delCache, getCacheDir } from './utils/media'
 import { getDefaultTemplate, getDescriptionTemplate } from './utils/template'
+import { getFriendlyErrorMessage } from './utils/error-handler'
+import { executeCommand, CommandError } from './commands/error-handler'
 
 // Import core modules
 import { getAiSummary, generateSelectorByAI } from './core/ai'
@@ -24,6 +26,8 @@ import { getRssData } from './core/parser'
 import { renderHtml2Image, preprocessHtmlImages } from './core/renderer'
 import { RssItemProcessor } from './core/item-processor'
 import { startFeeder, stopFeeder, formatArg, mixinArg, findRssItem, getLastContent } from './core/feeder'
+import { initMessageCache, getMessageCache } from './utils/message-cache'
+import { registerMessageCacheService } from './services/message-cache-service'
 
 // Import database and constants
 import { setupDatabase } from './database'
@@ -33,7 +37,7 @@ const logger = new Logger('rss-owl')
 const X2JS = require("x2js")
 const x2js = new X2JS()
 
-export const inject = { required: ["database"], optional: ["puppeteer", "censor", "assets"] }
+export const inject = { required: ["database"], optional: ["puppeteer", "censor", "assets", "server"] }
 
 export function apply(ctx: Context, config: Config) {
   // Setup database
@@ -45,6 +49,13 @@ export function apply(ctx: Context, config: Config) {
 
   // Initialize RSS item processor
   const processor = new RssItemProcessor(ctx, config, $http)
+
+  // Initialize message cache
+  if (config.cache?.enabled) {
+    initMessageCache(ctx, config, config.cache.maxSize || 100)
+    // Register HTTP API service
+    registerMessageCacheService(ctx)
+  }
 
   // Lifecycle management
   ctx.on('ready', async () => {
@@ -58,49 +69,23 @@ export function apply(ctx: Context, config: Config) {
     }
   })
 
-  // Helper functions (keeping locally for command use)
+  // Helper functions for commands
   const debugLocal = (message: any, name = '', type: "disable" | "error" | "info" | "details" = 'details') => {
     debug(config, message, name, type)
   }
 
-  const sleep = (delay = 1000) => new Promise(resolve => setTimeout(resolve, delay));
-
-  const getCacheDirLocal = () => getCacheDir(config)
-  const writeCacheFileLocal = async (fileUrl: string) => writeCacheFile(fileUrl, config)
-  const delCacheLocal = async () => delCache(config)
-
-  const getImageUrlLocal = async (url: string, arg: any, useBase64Mode = false) =>
-    getImageUrl(ctx, config, $http, url, arg, useBase64Mode)
-
-  const getVideoUrlLocal = async (url: string, arg: any, useBase64Mode = false, dom: any) =>
-    getVideoUrl(ctx, config, $http, url, arg, useBase64Mode, dom)
-
-  const puppeteerToFileLocal = async (puppeteer: string) =>
-    puppeteerToFile(ctx, config, puppeteer)
-
-  const parseRssItem = async (item: any, arg: any, authorId: string | number) =>
-    processor.parseRssItem(item, arg, authorId)
-
-  const getAiSummaryLocal = async (title: string, contentHtml: string) =>
-    getAiSummary(config, title, contentHtml)
-
-  const generateSelectorByAILocal = async (url: string, instruction: string, html: string) =>
-    generateSelectorByAI(config, url, instruction, html)
-
-  const getRssDataLocal = async (url: string, arg: any) =>
-    getRssData(ctx, config, $http, url, arg)
-
-  const renderHtml2ImageLocal = async (htmlContent: string, arg?: any) =>
-    renderHtml2Image(ctx, config, $http, htmlContent, arg)
-
-  const preprocessHtmlImagesLocal = async (htmlContent: string, arg?: any) =>
-    preprocessHtmlImages(ctx, config, $http, htmlContent, arg)
-
+  // Frequently used helper functions
   const parseQuickUrlLocal = (url: string) =>
     parseQuickUrl(url, config.msg.rssHubUrl, quickList)
 
   const parsePubDateLocal = (pubDate: any) =>
     parsePubDate(config, pubDate)
+
+  const getRssDataLocal = async (url: string, arg: any) =>
+    getRssData(ctx, config, $http, url, arg)
+
+  const parseRssItem = async (item: any, arg: any, authorId: string | number) =>
+    processor.parseRssItem(item, arg, authorId)
 
   const formatArgLocal = (options: any) =>
     formatArg(options, config)
@@ -111,20 +96,20 @@ export function apply(ctx: Context, config: Config) {
   const findRssItemLocal = (rssList: any[], keyword: number | string) =>
     findRssItem(rssList, keyword)
 
-  const getLastContentLocal = (item: any) =>
-    getLastContent(item, config)
+  const generateSelectorByAILocal = async (url: string, instruction: string, html: string) =>
+    generateSelectorByAI(config, url, instruction, html)
 
   // Register commands
   ctx.guild()
-    .command('rssowl <url:text>', '*订阅 RSS 链接*')
+    .command('rssowl <url:text>', '订阅 RSS 链接')
     .alias('rsso')
     .usage(usage)
     .option('list', '-l [content] 查看订阅列表(详情)')
-    .option('remove', '-r <content> [订阅id|关键字] *删除订阅*')
-    .option('removeAll', '*删除全部订阅*')
+    .option('remove', '-r <content> [订阅id|关键字] 删除订阅')
+    .option('removeAll', '删除全部订阅')
     .option('follow', '-f <content> [订阅id|关键字] 关注订阅，在该订阅更新时提醒你')
-    .option('followAll', '<content> [订阅id|关键字] **在该订阅更新时提醒所有人**')
-    .option('target', '<content> [群组id] **跨群订阅**')
+    .option('followAll', '<content> [订阅id|关键字] 在该订阅更新时提醒所有人')
+    .option('target', '<content> [群组id] 跨群订阅')
     .option('arg', '-a <content> 自定义配置')
     .option('template', '-i <content> 消息模板[content(文字模板)|default(图片模板)],更多见readme')
     .option('title', '-t <content> 自定义命名')
@@ -218,7 +203,7 @@ export function apply(ctx: Context, config: Config) {
           return messageList.join("")
         } catch (error) {
           debugLocal(error, 'pull error', 'error')
-          return '拉取失败'
+          return `拉取失败: ${getFriendlyErrorMessage(error, '获取订阅数据')}`
         }
       }
 
@@ -290,7 +275,7 @@ export function apply(ctx: Context, config: Config) {
           return `订阅成功: ${title}`
         } catch (error) {
           debugLocal(error, 'add error', 'error')
-          return `订阅失败: ${error}`
+          return `订阅失败: ${getFriendlyErrorMessage(error, '添加订阅')}`
         }
       }
       return usage
@@ -298,19 +283,30 @@ export function apply(ctx: Context, config: Config) {
 
   // HTML monitoring command
   ctx.guild()
-    .command('rssowl.html <url:string>', '监控静态网页 (CSS Selector)')
+    .command('rssowl.html <url:string>', '监控网页变化 (CSS Selector)')
     .alias('rsso.html')
     .usage(`
-示例: rsso.html https://www.zhihu.com/billboard -s ".BillBoard-item:first-child"
+HTML 网页监控功能，使用 CSS 选择器提取内容
+用法:
+  rsso.html https://example.com -s ".item"                    - 监控网页变化
+  rsso.html https://example.com -s ".item" -T                  - 测试选择器
+  rsso.html https://example.com -s ".item" -t "我的订阅"       - 自定义标题
+  rsso.html https://example.com -s ".item" -P                  - SPA 动态页面
+  rsso.html https://example.com -s ".item" -w 5000             - 渲染后等待5秒
+
+示例:
+  rsso.html https://www.zhihu.com/billboard -s ".BillBoard-item:first-child"
+  rsso.html https://news.ycombinator.com -s ".titleline > a"
     `)
     .option('selector', '-s <选择器> CSS 选择器 (必填)')
     .option('title', '-t <标题> 自定义订阅标题')
     .option('template', '-i <模板> 消息模板 (推荐 content)')
     .option('text', '--text 只提取纯文本')
-    .option('puppeteer', '-P 使用 Puppeteer 渲染')
+    .option('puppeteer', '-P 使用 Puppeteer 渲染 (适用于SPA)')
     .option('wait', '-w <毫秒> 渲染后等待时间')
-    .option('waitSelector', '-W <选择器> 等待特定元素')
-    .option('test', '-T 测试抓取结果')
+    .option('waitSelector', '-W <选择器> 等待特定元素出现')
+    .option('test', '-T 测试抓取结果 (不创建订阅)')
+    .example('rsso.html https://news.ycombinator.com -s ".titleline > a"')
     .action(async ({ session, options }, url) => {
       if (!url) return '请输入 URL'
       if (!options.selector) return '请指定 CSS 选择器 (-s)'
@@ -332,6 +328,7 @@ export function apply(ctx: Context, config: Config) {
       }
 
       try {
+        // Test mode: just preview the data
         if (options.test) {
           let items = await getRssDataLocal(url, arg)
           if (!items || items.length === 0) return '未找到符合选择器的元素'
@@ -341,11 +338,62 @@ export function apply(ctx: Context, config: Config) {
           return `找到 ${items.length} 个元素:\n\n${preview}`
         }
 
-        // Add subscription logic here similar to main RSS command
-        return 'HTML 监控功能开发中，请使用 -T 测试选择器'
+        // Full subscription flow (similar to RSS subscription)
+        const rssList = await ctx.database.get(('rssOwl' as any), { platform, guildId })
+
+        // Check if subscription already exists
+        if (rssList.find(i => i.url == url)) {
+          return '该订阅已存在'
+        }
+
+        // Get HTML monitoring data
+        let htmlItems = await getRssDataLocal(url, arg)
+        if (!htmlItems || htmlItems.length === 0) {
+          return '未找到符合选择器的元素，无法创建订阅'
+        }
+
+        // Determine title
+        let title = options?.title || htmlItems[0]?.rss?.channel?.title || `HTML监控: ${url}`
+
+        // Create subscription record
+        let rssItem: any = {
+          url,
+          platform,
+          guildId,
+          author,
+          rssId: title, // Use title as rssId for HTML monitoring
+          arg,
+          title,
+          lastPubDate: new Date(), // HTML monitoring doesn't have real timestamps
+          lastContent: [],
+          followers: [],
+          firstime: new Date()
+        }
+
+        // Check for duplicate (if enabled)
+        if (config.basic.urlDeduplication && rssList.find(i => i.rssId == rssItem.rssId)) {
+          return `订阅已存在: ${rssItem.rssId}`
+        }
+
+        // Save to database
+        await ctx.database.create(('rssOwl' as any), rssItem)
+
+        // First load preview (if enabled)
+        if (config.basic.firstLoad && arg.firstLoad !== false && htmlItems.length > 0) {
+          const maxItem = arg.forceLength || 1
+          let messageList = await Promise.all(
+            htmlItems
+              .filter((v, i) => i < maxItem)
+              .map(async i => await parseRssItem(i, { ...rssItem, ...rssItem.arg }, rssItem.author))
+          )
+          let message = messageList.join("")
+          await ctx.broadcast([`${platform}:${guildId}`], message)
+        }
+
+        return `订阅成功: ${title}\n提示: HTML监控基于内容变化检测，请确保选择器稳定`
       } catch (error: any) {
         debugLocal(error, 'html error', 'error')
-        return `抓取失败: ${error.message}`
+        return `抓取失败: ${getFriendlyErrorMessage(error, 'HTML监控')}`
       }
     })
 
@@ -353,8 +401,21 @@ export function apply(ctx: Context, config: Config) {
   ctx.guild()
     .command('rssowl.ask <url:string> <instruction:text>', 'AI 智能订阅网页')
     .alias('rsso.ask')
-    .usage('例如: rsso.ask https://news.ycombinator.com "监控首页的前5条新闻标题"')
+    .usage(`AI 智能订阅功能，自动生成 CSS 选择器
+
+前置要求:
+  - 需要配置 AI 功能 (config.ai.enabled = true)
+  - 需要配置 API Key (config.ai.apiKey)
+
+用法:
+  rsso.ask https://news.ycombinator.com "监控首页的前5条新闻标题"
+
+示例:
+  rsso.ask https://www.zhihu.com/billboard "获取热榜第一条"
+  rsso.ask https://example.com "提取所有文章标题" -T
+    `)
     .option('test', '-T 测试模式 (只分析不订阅)')
+    .example('rsso.ask https://news.ycombinator.com "监控首页的前5条新闻标题"')
     .action(async ({ session, options }, url, instruction) => {
       if (!url) return '请输入网址'
       if (!instruction) return '请描述你的需求'
@@ -379,7 +440,7 @@ export function apply(ctx: Context, config: Config) {
         return `AI 生成的选择器: ${selector}\n请使用 rsso.html ${url} -s "${selector}" 完成订阅`
       } catch (error: any) {
         debugLocal(error, 'ask error', 'error')
-        return `AI 分析失败: ${error.message}`
+        return `AI 分析失败: ${getFriendlyErrorMessage(error, 'AI生成选择器')}`
       }
     })
 
@@ -397,6 +458,7 @@ export function apply(ctx: Context, config: Config) {
     `)
     .option('puppeteer', '-P 使用 Puppeteer 渲染')
     .option('test', '-T 测试模式 (只预览不订阅)')
+    .example('rsso.watch https://example.com "缺货"')
     .action(async ({ session, options }, url, keyword) => {
       if (!url) return '请输入 URL'
 
@@ -427,7 +489,279 @@ export function apply(ctx: Context, config: Config) {
         return '请使用 rsso 命令完成订阅，或使用 -T 测试'
       } catch (error: any) {
         debugLocal(error, 'watch error', 'error')
-        return `监控失败: ${error.message}`
+        return `监控失败: ${getFriendlyErrorMessage(error, '网页监控')}`
+      }
+    })
+
+  // Message cache management commands
+  ctx.guild()
+    .command('rssowl.cache', '消息缓存管理')
+    .alias('rsso.cache')
+    .usage(`
+消息缓存管理功能，查看和管理已推送的 RSS 消息缓存。
+
+用法:
+  rsso.cache list [页数]              - 查看缓存消息列表
+  rsso.cache search <关键词>          - 搜索缓存消息
+  rsso.cache stats                    - 查看缓存统计
+  rsso.cache clear                    - 清空所有缓存
+  rsso.cache cleanup [保留数量]       - 清理缓存（保留最新N条）
+
+示例:
+  rsso.cache list                     - 查看第1页（每页10条）
+  rsso.cache list 2                   - 查看第2页
+  rsso.cache search 新闻              - 搜索包含"新闻"的消息
+  rsso.cache stats                    - 查看统计信息
+  rsso.cache cleanup 50               - 清理并保留最新50条
+    `)
+    .action(async ({ session, options }, subcommand, ...args) => {
+      const { authority } = session.user as any
+      const cache = getMessageCache()
+
+      // 检查缓存是否启用
+      if (!cache) {
+        return '消息缓存功能未启用，请在配置中启用 cache.enabled'
+      }
+
+      // 如果没有子命令，显示帮助
+      if (!subcommand) {
+        return `消息缓存管理
+
+可用指令:
+  rsso.cache list [页数]              - 查看缓存消息列表
+  rsso.cache search <关键词>          - 搜索缓存消息
+  rsso.cache stats                    - 查看缓存统计
+  rsso.cache clear                    - 清空所有缓存
+  rsso.cache cleanup [保留数量]       - 清理缓存（保留最新N条）
+
+详细信息请使用: rsso.cache --help`
+      }
+
+      // 处理子命令
+      switch (subcommand) {
+        case 'list': {
+          const page = parseInt(args[0]) || 1
+          const limit = 10
+          const offset = (page - 1) * limit
+
+          try {
+            const messages = await cache.getMessages({
+              limit,
+              offset
+            })
+
+            if (messages.length === 0) {
+              return `暂无缓存消息`
+            }
+
+            const stats = await cache.getStats()
+
+            let output = `📋 缓存消息列表 (第${page}页，共${Math.ceil(stats.totalMessages / limit)}页，总计${stats.totalMessages}条)\n\n`
+
+            output += messages.map((msg, index) => {
+              const date = new Date(msg.createdAt).toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+              const title = msg.title.length > 30 ? msg.title.substring(0, 30) + '...' : msg.title
+              return `${index + 1 + offset}. [${msg.rssId}] ${title}\n   时间: ${date}\n   链接: ${msg.link}`
+            }).join('\n\n')
+
+            output += `\n\n💡 使用 "rsso.cache list ${page + 1}" 查看下一页`
+            output += `\n💡 使用 "rsso.cache message ${messages[0].id}" 查看详情`
+
+            return output
+          } catch (error: any) {
+            debugLocal(error, 'cache list error', 'error')
+            return `获取消息列表失败: ${error.message}`
+          }
+        }
+
+        case 'message': {
+          const messageId = parseInt(args[0])
+
+          if (!messageId) {
+            return '请提供消息ID\n使用方法: rsso.cache message <消息ID>'
+          }
+
+          try {
+            const message = await cache.getMessage(messageId)
+
+            if (!message) {
+              return `未找到 ID 为 ${messageId} 的消息`
+            }
+
+            const pubDate = new Date(message.pubDate).toLocaleString('zh-CN', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit'
+            })
+            const createdAt = new Date(message.createdAt).toLocaleString('zh-CN', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit'
+            })
+
+            let output = `📰 消息详情 #${message.id}\n\n`
+            output += `📰 标题: ${message.title}\n`
+            output += `📡 订阅: ${message.rssId}\n`
+            output += `👥 群组: ${message.platform}:${message.guildId}\n`
+            output += `🔗 链接: ${message.link}\n`
+            output += `📅 发布时间: ${pubDate}\n`
+            output += `💾 缓存时间: ${createdAt}\n`
+
+            if (message.content) {
+              const content = message.content.length > 200
+                ? message.content.substring(0, 200) + '...'
+                : message.content
+              output += `\n📝 内容:\n${content}`
+            }
+
+            if (message.imageUrl) {
+              output += `\n\n🖼️ 图片: ${message.imageUrl}`
+            }
+
+            if (message.videoUrl) {
+              output += `\n\n🎬 视频: ${message.videoUrl}`
+            }
+
+            return output
+          } catch (error: any) {
+            debugLocal(error, 'cache message error', 'error')
+            return `获取消息详情失败: ${error.message}`
+          }
+        }
+
+        case 'search': {
+          const keyword = args[0]
+
+          if (!keyword) {
+            return '请提供搜索关键词\n使用方法: rsso.cache search <关键词>'
+          }
+
+          try {
+            const messages = await cache.searchMessages({
+              keyword,
+              limit: 10
+            })
+
+            if (messages.length === 0) {
+              return `未找到包含 "${keyword}" 的消息`
+            }
+
+            let output = `🔍 搜索结果 "${keyword}" (找到${messages.length}条)\n\n`
+
+            output += messages.map((msg, index) => {
+              const date = new Date(msg.createdAt).toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+              const title = msg.title.length > 30 ? msg.title.substring(0, 30) + '...' : msg.title
+              return `${index + 1}. [${msg.rssId}] ${title}\n   时间: ${date}\n   ID: ${msg.id}`
+            }).join('\n\n')
+
+            output += `\n\n💡 使用 "rsso.cache message <ID>" 查看详情`
+
+            return output
+          } catch (error: any) {
+            debugLocal(error, 'cache search error', 'error')
+            return `搜索失败: ${error.message}`
+          }
+        }
+
+        case 'stats': {
+          try {
+            const stats = await cache.getStats()
+
+            let output = `📊 缓存统计信息\n\n`
+            output += `📦 总消息数: ${stats.totalMessages}\n`
+
+            if (stats.oldestMessage) {
+              const oldest = new Date(stats.oldestMessage).toLocaleString('zh-CN')
+              output += `📅 最早消息: ${oldest}\n`
+            }
+
+            if (stats.newestMessage) {
+              const newest = new Date(stats.newestMessage).toLocaleString('zh-CN')
+              output += `📅 最新消息: ${newest}\n`
+            }
+
+            output += `\n📡 按订阅统计:\n`
+
+            const subscriptionEntries = Object.entries(stats.bySubscription)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 10)
+
+            if (subscriptionEntries.length > 0) {
+              subscriptionEntries.forEach(([rssId, count]) => {
+                output += `  ${rssId}: ${count}条\n`
+              })
+            }
+
+            output += `\n👥 按群组统计:\n`
+
+            const guildEntries = Object.entries(stats.byGuild)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 10)
+
+            if (guildEntries.length > 0) {
+              guildEntries.forEach(([guild, count]) => {
+                output += `  ${guild}: ${count}条\n`
+              })
+            }
+
+            output += `\n⚙️ 最大缓存限制: ${cache.getMaxCacheSize()}条`
+
+            return output
+          } catch (error: any) {
+            debugLocal(error, 'cache stats error', 'error')
+            return `获取统计信息失败: ${error.message}`
+          }
+        }
+
+        case 'clear': {
+          if (authority < config.basic.authority) {
+            return '权限不足，需要权限等级 >= ' + config.basic.authority
+          }
+
+          try {
+            const deletedCount = await cache.clearAll()
+            return `✅ 已清空所有缓存，共删除 ${deletedCount} 条消息`
+          } catch (error: any) {
+            debugLocal(error, 'cache clear error', 'error')
+            return `清空缓存失败: ${error.message}`
+          }
+        }
+
+        case 'cleanup': {
+          if (authority < config.basic.authority) {
+            return '权限不足，需要权限等级 >= ' + config.basic.authority
+          }
+
+          const keepLatest = parseInt(args[0]) || cache.getMaxCacheSize()
+
+          try {
+            const deletedCount = await cache.cleanup({ keepLatest })
+            if (deletedCount === 0) {
+              return `✅ 当前缓存数量未超过限制，无需清理`
+            }
+            return `✅ 已清理缓存，保留最新 ${keepLatest} 条，删除 ${deletedCount} 条消息`
+          } catch (error: any) {
+            debugLocal(error, 'cache cleanup error', 'error')
+            return `清理缓存失败: ${error.message}`
+          }
+        }
+
+        default:
+          return `未知的子命令: ${subcommand}\n使用 "rsso.cache" 查看可用指令`
       }
     })
 }

@@ -25,6 +25,8 @@ export const Config: Schema<ConfigType> = Schema.object({
     autoSplitImage: Schema.boolean().description('垂直拆分大尺寸图片，解决部分适配器发不出长图的问题').default(true),
     cacheDir: Schema.string().description('File模式时使用的缓存路径').default('data/cache/rssOwl'),
     replaceDir: Schema.string().description('缓存替换路径，仅在使用docker部署时需要设置').default(''),
+    maxImageSize: Schema.number().description('图片最大文件大小限制（MB），超出限制的图片将被跳过').default(30),
+    maxVideoSize: Schema.number().description('视频最大文件大小限制（MB），超出限制的视频将被跳过').default(30),
   }).description('基础设置'),
   template: Schema.object({
     bodyWidth: Schema.number().description('puppeteer图片的宽度(px)，较低的值可能导致排版错误，仅在非custom的模板生效').default(600),
@@ -93,8 +95,20 @@ export const Config: Schema<ConfigType> = Schema.object({
     maxInputLength: Schema.number().description('发送给 AI 的最大字数限制').default(2000),
     timeout: Schema.number().description('AI 请求超时时间(毫秒)').default(30000),
   }).description('AI 摘要设置'),
+  cache: Schema.object({
+    enabled: Schema.boolean().description('启用消息缓存').default(true),
+    maxSize: Schema.number().description('最大缓存消息条数').default(100),
+  }).description('消息缓存设置'),
   // customUrlEnable:Schema.boolean().description('开发中：允许使用自定义规则对网页进行提取，用于对非RSS链接抓取').default(false).experimental(),
-  debug: Schema.union(["disable","error","info","details"] as const).default("disable"),
+  debug: Schema.union(["disable","error","info","details"] as const).default("disable").description('调试级别'),
+  logging: Schema.object({
+    structured: Schema.boolean().description('启用结构化日志（JSON格式）').default(false),
+    includeTimestamp: Schema.boolean().description('包含时间戳').default(true),
+    includeLevel: Schema.boolean().description('包含日志级别').default(true),
+    includeModule: Schema.boolean().description('包含模块名').default(true),
+    includeContext: Schema.boolean().description('包含额外上下文信息').default(false),
+    contextFields: Schema.array(Schema.string()).description('要包含的上下文字段（如 guildId, platform 等）').default([]),
+  }).description('日志设置'),
 })
 
 // 导出 ConfigType 作为类型别名，供其他模块使用

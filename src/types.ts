@@ -21,6 +21,20 @@ declare module 'koishi' {
     title: string
     lastPubDate: Date
   }
+
+  interface rss_message_cache {
+    id: number
+    rssId: string
+    guildId: string
+    platform: string
+    title: string
+    content: string
+    link: string
+    pubDate: Date
+    imageUrl: string
+    videoUrl: string
+    createdAt: Date
+  }
 }
 
 export interface Config {
@@ -29,7 +43,9 @@ export interface Config {
   net?: NetConfig
   msg?: MsgConfig
   ai?: AiConfig
+  cache?: CacheConfig
   debug?: "disable"|"error"|"info"|"details"
+  logging?: LoggingConfig
 }
 
 export const debugLevel = ["disable","error","info","details"]
@@ -50,6 +66,8 @@ export interface BasicConfig {
   autoSplitImage?: boolean
   cacheDir?: string
   replaceDir?: string
+  maxImageSize?: number  // 图片最大文件大小（MB）
+  maxVideoSize?: number  // 视频最大文件大小（MB）
 
   authority:number
   advancedAuthority:number
@@ -146,4 +164,18 @@ export interface rssArg {
   mode?: 'static' | 'puppeteer'
   waitFor?: number
   waitSelector?: string
+}
+
+export interface CacheConfig {
+  enabled?: boolean
+  maxSize?: number  // 最大缓存条数，默认 100
+}
+
+export interface LoggingConfig {
+  structured?: boolean  // 启用结构化日志（JSON格式）
+  includeTimestamp?: boolean  // 包含时间戳
+  includeLevel?: boolean  // 包含日志级别
+  includeModule?: boolean  // 包含模块名
+  includeContext?: boolean  // 包含额外上下文信息
+  contextFields?: string[]  // 要包含的上下文字段
 }

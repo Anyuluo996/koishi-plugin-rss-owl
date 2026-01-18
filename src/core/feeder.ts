@@ -6,6 +6,7 @@ import { delCache } from '../utils/media'
 import { getRssData } from './parser'
 import { RssItemProcessor } from './item-processor'
 import { quickList } from '../constants'
+import { getMessageCache } from '../utils/message-cache'
 
 export interface FeederDependencies {
   ctx: Context
@@ -325,15 +326,52 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       // 8. Send Broadcast
       try {
         debug(config, `Sending update for ${rssItem.title} to ${rssItem.platform}:${rssItem.guildId}`, 'feeder', 'details')
-        const broadcast = await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
-        if (broadcast.length === 0) {
-          debug(config, `Message generated but not sent (Target not found/Bot muted): ${rssItem.title}`, 'feeder', 'info')
-        } else {
-          debug(config, `更新成功:${rssItem.title}`, '', 'info')
+
+        // 检查 bot 是否可用
+        const bot = ctx.bots.find(bot => bot.platform === rssItem.platform && bot.selfId === rssItem.author)
+        if (!bot) {
+          debug(config, `Bot not found for ${rssItem.platform}:${rssItem.author}, skipping broadcast`, 'feeder', 'info')
+          // 即使 bot 不可用，也要更新数据库状态
+          await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, {
+            lastPubDate,
+            arg: originalArg,
+            lastContent: { itemArray: currentContent }
+          })
+          continue
+        }
+
+        // 发送消息
+        await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
+        debug(config, `更新成功:${rssItem.title}`, '', 'info')
+
+        // 缓存消息
+        if (config.cache?.enabled && currentContent.length > 0) {
+          const cache = getMessageCache()
+          if (cache) {
+            // 缓存每条消息
+            for (const item of currentContent) {
+              try {
+                await cache.addMessage({
+                  rssId: rssItem.rssId.toString(),
+                  guildId: rssItem.guildId,
+                  platform: rssItem.platform,
+                  title: item.title || '',
+                  content: item.description || '',
+                  link: item.link || '',
+                  pubDate: parsePubDate(config, item.pubDate),
+                  imageUrl: item.enclosure?.url || '',
+                  videoUrl: ''
+                })
+              } catch (err) {
+                debug(config, `缓存消息失败: ${err.message}`, 'cache', 'info')
+              }
+            }
+          }
         }
       } catch (err: any) {
+        debug(config, `RSS推送失败 [${rssItem.title}]: ${err.message}`, 'feeder', 'error')
         console.error(`RSS推送失败 [${rssItem.title}]: ${err.message}`)
-        console.warn(`已跳过该条 RSS 更新以防止无限重试循环。`)
+        // 即使发送失败，也要更新数据库状态，避免无限重试
       }
 
       // 9. Update Database State

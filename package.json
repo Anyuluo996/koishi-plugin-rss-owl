@@ -1,7 +1,7 @@
 {
   "name": "@anyul/koishi-plugin-rss",
   "description": "Koishi RSS订阅器，支持多种RSS源、图片渲染、AI摘要等高级功能",
-  "version": "5.0.0-beta",
+  "version": "5.0.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "author": "Anyuluo <anyul@email.com>",
@@ -42,6 +42,16 @@
     "x2js": "^3.4.4"
   },
   "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "build": "tsc"
   }
 }

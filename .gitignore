@@ -21,3 +21,5 @@ tsconfig.tsbuildinfo
 *.sln
 src/index_old.ts
 src/index.ts.bak
+*.md
+jest.config.js
