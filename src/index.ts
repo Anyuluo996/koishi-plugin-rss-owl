@@ -28,6 +28,7 @@ import { RssItemProcessor } from './core/item-processor'
 import { startFeeder, stopFeeder, formatArg, mixinArg, findRssItem, getLastContent } from './core/feeder'
 import { initMessageCache, getMessageCache } from './utils/message-cache'
 import { registerMessageCacheService } from './services/message-cache-service'
+import { NotificationQueueManager } from './core/notification-queue'
 
 // Import database and constants
 import { setupDatabase } from './database'
@@ -50,6 +51,9 @@ export function apply(ctx: Context, config: Config) {
   // Initialize RSS item processor
   const processor = new RssItemProcessor(ctx, config, $http)
 
+  // Initialize notification queue manager
+  const queueManager = new NotificationQueueManager(ctx, config)
+
   // Initialize message cache
   if (config.cache?.enabled) {
     initMessageCache(ctx, config, config.cache.maxSize || 100)
@@ -59,7 +63,7 @@ export function apply(ctx: Context, config: Config) {
 
   // Lifecycle management
   ctx.on('ready', async () => {
-    startFeeder(ctx, config, $http, processor)
+    startFeeder(ctx, config, $http, processor, queueManager)
   })
 
   ctx.on('dispose', async () => {
@@ -868,6 +872,119 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
 
         default:
           return `未知的子命令: ${subcommand}\n使用 "rsso.cache" 查看可用指令`
+      }
+    })
+
+  // Queue management commands
+  ctx.guild()
+    .command('rssowl.queue', '发送队列管理')
+    .alias('rsso.queue')
+    .usage(`
+发送队列管理功能，查看和管理待发送的消息队列。
+
+用法:
+  rsso.queue stats                - 查看队列统计
+  rsso.queue retry [id]            - 重试失败的任务
+  rsso.queue retry --all           - 重试所有失败任务
+  rsso.queue cleanup [hours]       - 清理旧的成功任务（默认24小时）
+
+示例:
+  rsso.queue stats                 - 查看队列状态
+  rsso.queue retry 5               - 重试ID为5的任务
+  rsso.queue retry --all           - 重试所有失败任务
+  rsso.queue cleanup 48            - 清理48小时前的成功任务
+
+说明:
+  - PENDING: 待发送
+  - RETRY: 等待重试
+  - FAILED: 发送失败
+  - SUCCESS: 发送成功
+    `)
+    .action(async ({ session, options }, subcommand, ...args) => {
+      const { authority } = session.user as any
+
+      if (!subcommand) {
+        return `发送队列管理
+
+可用指令:
+  rsso.queue stats                - 查看队列统计
+  rsso.queue retry [id]            - 重试失败的任务
+  rsso.queue retry --all           - 重试所有失败任务
+  rsso.queue cleanup [hours]       - 清理旧的成功任务（默认24小时）
+
+详细信息请使用: rsso.queue --help`
+      }
+
+      // 处理子命令
+      switch (subcommand) {
+        case 'stats': {
+          try {
+            const stats = await queueManager.getStats()
+
+            let output = `📊 发送队列统计\n\n`
+            output += `⏳ 待发送: ${stats.pending}\n`
+            output += `🔄 等待重试: ${stats.retry}\n`
+            output += `❌ 发送失败: ${stats.failed}\n`
+            output += `✅ 发送成功: ${stats.success}\n`
+
+            const total = stats.pending + stats.retry + stats.failed + stats.success
+            output += `\n📦 总计: ${total} 个任务`
+
+            return output
+          } catch (error: any) {
+            debugLocal(error, 'queue stats error', 'error')
+            return `获取统计信息失败: ${error.message}`
+          }
+        }
+
+        case 'retry': {
+          if (authority < config.basic.authority) {
+            return `权限不足，需要权限等级 >= ${config.basic.authority}`
+          }
+
+          try {
+            const taskId = args[0]
+
+            if (taskId === '--all') {
+              const count = await queueManager.retryFailedTasks()
+              return `✅ 已重置 ${count} 个失败任务为 PENDING 状态`
+            } else if (taskId) {
+              const id = parseInt(taskId)
+              if (isNaN(id)) {
+                return `❌ 无效的任务ID: ${taskId}`
+              }
+              const count = await queueManager.retryFailedTasks(id)
+              return count > 0 ? `✅ 已重置任务 ${id}` : `❌ 未找到任务 ${id}`
+            } else {
+              return `请指定任务ID或使用 --all 重试所有失败任务\n使用方法: rsso.queue retry <id|--all>`
+            }
+          } catch (error: any) {
+            debugLocal(error, 'queue retry error', 'error')
+            return `重试失败: ${error.message}`
+          }
+        }
+
+        case 'cleanup': {
+          if (authority < config.basic.authority) {
+            return `权限不足，需要权限等级 >= ${config.basic.authority}`
+          }
+
+          try {
+            const hours = parseInt(args[0]) || 24
+            const count = await queueManager.cleanupSuccessTasks(hours)
+
+            if (count === 0) {
+              return `✅ 没有需要清理的成功任务`
+            }
+            return `✅ 已清理 ${count} 个超过 ${hours} 小时的成功任务`
+          } catch (error: any) {
+            debugLocal(error, 'queue cleanup error', 'error')
+            return `清理失败: ${error.message}`
+          }
+        }
+
+        default:
+          return `未知的子命令: ${subcommand}\n使用 "rsso.queue" 查看可用指令`
       }
     })
 }

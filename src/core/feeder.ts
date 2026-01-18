@@ -2,19 +2,20 @@ import { Context, clone } from 'koishi'
 import { Config, rssArg } from '../types'
 import { debug } from '../utils/logger'
 import { parsePubDate, parseQuickUrl } from '../utils/common'
-import { delCache } from '../utils/media'
 import { getRssData } from './parser'
 import { RssItemProcessor } from './item-processor'
 import { quickList } from '../constants'
-import { getMessageCache } from '../utils/message-cache'
+import { NotificationQueueManager, QueueTaskContent } from './notification-queue'
 
 export interface FeederDependencies {
   ctx: Context
   config: Config
   $http: any
+  queueManager: NotificationQueueManager
 }
 
 let interval: any = null
+let queueInterval: any = null
 
 export function findRssItem(rssList: any[], keyword: number | string) {
   let index = ((rssList.findIndex(i => i.rssId === +keyword) + 1) ||
@@ -165,9 +166,11 @@ export function mixinArg(arg: any, config: Config): rssArg {
   return res;
 }
 
+/**
+ * 生产者：抓取 RSS，发现新消息，存入队列
+ */
 export async function feeder(deps: FeederDependencies, processor: RssItemProcessor) {
-  const { ctx, config, $http } = deps
-  // debug(config, "feeder run", 'debug');
+  const { ctx, config, $http, queueManager } = deps
 
   // Use type assertion for custom table
   const rssList = await ctx.database.get(('rssOwl' as any), {})
@@ -310,9 +313,10 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       debug(config, `${rssItem.title}: Found ${rssItemArray.length} new items`, 'feeder', 'info')
       debug(config, rssItemArray.map(i => i.title), '', 'info')
 
-      // 6. Process Items (Generate Messages)
+      // 6. 生成消息并添加到队列（生产者核心逻辑）
       const itemsToSend = [...rssItemArray].reverse()
 
+      // 生成所有消息
       const messageList = (await Promise.all(
         itemsToSend.map(async i => await processor.parseRssItem(i, { ...rssItem, ...arg }, rssItem.author))
       )).filter(m => m) // Filter empty messages
@@ -324,7 +328,7 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
         continue
       }
 
-      // 7. Construct Final Message
+      // 7. 构建最终消息
       let message = ""
       const shouldMerge = arg.merge === true || config.basic?.merge === '一直合并' || (config.basic?.merge === '有多条更新时合并' && messageList.length > 1)
 
@@ -343,79 +347,31 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
         message += `<message>${mentions}</message>`
       }
 
-      // 8. Send Broadcast
-      try {
-        debug(config, `Sending update for ${rssItem.title} to ${rssItem.platform}:${rssItem.guildId}`, 'feeder', 'details')
-
-        // Koishi broadcast 会自动查找可用的 bot，无需手动检查
-        // author 字段兼容用户ID和bot selfId两种格式
-        // 发送消息
-        try {
-          await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
-          debug(config, `更新成功:${rssItem.title}`, '', 'info')
-        } catch (sendError: any) {
-          // OneBot retcode 1200: 不支持的消息格式（通常是视频）
-          if (sendError.code?.toString?.() === '1200' || sendError.message?.includes('1200')) {
-            debug(config, `消息格式不被支持，尝试清理视频元素后重试: ${rssItem.title}`, 'feeder', 'info')
-
-            // 移除 video 元素，保留视频链接
-            const fallbackMessage = message
-              .replace(/<video[^>]*>.*?<\/video>/gis, (match: string) => {
-                // 提取视频 URL
-                const srcMatch = match.match(/src=["']([^"']+)["']/)
-                if (srcMatch) {
-                  return `\n🎬 视频: ${srcMatch[1]}\n`
-                }
-                return '\n[视频不支持]\n'
-              })
-
-            try {
-              await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], fallbackMessage)
-              debug(config, `降级发送成功:${rssItem.title}`, '', 'info')
-            } catch (retryError: any) {
-              debug(config, `降级发送也失败: ${retryError.message}`, 'feeder', 'error')
-              throw retryError
-            }
-          } else {
-            throw sendError
-          }
-        }
-
-        // 缓存最终发送的消息
-        if (config.cache?.enabled && messageList.length > 0) {
-          const cache = getMessageCache()
-          if (cache) {
-            // 缓存每条消息的最终形式
-            for (let i = 0; i < itemsToSend.length && i < messageList.length; i++) {
-              const item = itemsToSend[i]
-              const finalMsg = messageList[i]
-
-              try {
-                await cache.addMessage({
-                  rssId: rssItem.rssId.toString(),
-                  guildId: rssItem.guildId,
-                  platform: rssItem.platform,
-                  title: item.title || '',
-                  content: item.description || '',
-                  link: item.link || '',
-                  pubDate: parsePubDate(config, item.pubDate),
-                  imageUrl: item.enclosure?.url || '',
-                  videoUrl: '',
-                  finalMessage: finalMsg // 缓存最终发送的消息
-                })
-              } catch (err) {
-                debug(config, `缓存消息失败: ${err.message}`, 'cache', 'info')
-              }
-            }
-          }
-        }
-      } catch (err: any) {
-        debug(config, `RSS推送失败 [${rssItem.title}]: ${err.message}`, 'feeder', 'error')
-        console.error(`RSS推送失败 [${rssItem.title}]: ${err.message}`)
-        // 即使发送失败，也要更新数据库状态，避免无限重试
+      // 8. 添加任务到队列（关键变更：不再直接发送）
+      const taskContent: QueueTaskContent = {
+        message,
+        originalItem: itemsToSend[0],
+        isDowngraded: false,
+        title: itemsToSend[0]?.title,
+        description: itemsToSend[0]?.description,
+        link: itemsToSend[0]?.link,
+        pubDate: parsePubDate(config, itemsToSend[0]?.pubDate),
+        imageUrl: itemsToSend[0]?.enclosure?.url
       }
 
-      // 9. Update Database State
+      await queueManager.addTask({
+        subscribeId: String(rssItem.id),
+        rssId: rssItem.rssId || rssItem.title,
+        uid: itemsToSend[0]?.link || itemsToSend[0]?.guid || `${Date.now()}`,
+        guildId: rssItem.guildId,
+        platform: rssItem.platform,
+        content: taskContent
+      })
+
+      debug(config, `✓ 已添加到发送队列: ${rssItem.title}`, 'feeder', 'info')
+
+      // 9. 更新数据库状态（关键：无论发送是否成功，都更新 lastPubDate）
+      // 这样即使 Bot 掉线，重启后也不会重复发送旧消息
       await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, {
         lastPubDate,
         arg: originalArg,
@@ -428,24 +384,40 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
   }
 }
 
-export function startFeeder(ctx: Context, config: Config, $http: any, processor: RssItemProcessor) {
-  const deps = { ctx, config, $http }
+export function startFeeder(ctx: Context, config: Config, $http: any, processor: RssItemProcessor, queueManager: NotificationQueueManager) {
+  const deps = { ctx, config, $http, queueManager }
 
   // Initial run
   feeder(deps, processor).catch(err => console.error("Initial feeder run failed:", err))
 
+  // 启动生产者定时器（抓取 RSS）
   const refreshInterval = (config.basic?.refresh || 600) * 1000
   interval = setInterval(async () => {
     if (config.basic?.imageMode === 'File') {
+      const { delCache } = await import('../utils/media')
       await delCache(config)
     }
     await feeder(deps, processor)
   }, refreshInterval)
+
+  // 启动消费者定时器（处理发送队列）
+  // 频率更高，确保消息快速发送
+  const queueProcessInterval = 30 * 1000 // 每 30 秒处理一次队列
+  queueInterval = setInterval(async () => {
+    await queueManager.processQueue()
+  }, queueProcessInterval)
+
+  // 立即处理一次队列（启动时）
+  queueManager.processQueue().catch(err => console.error("Initial queue processing failed:", err))
 }
 
 export function stopFeeder() {
   if (interval) {
     clearInterval(interval)
     interval = null
+  }
+  if (queueInterval) {
+    clearInterval(queueInterval)
+    queueInterval = null
   }
 }
