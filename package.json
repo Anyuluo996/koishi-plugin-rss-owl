@@ -1,7 +1,7 @@
 {
   "name": "@anyul/koishi-plugin-rss",
   "description": "Koishi RSS订阅器，支持多种RSS源、图片渲染、AI摘要等高级功能",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "author": "Anyuluo <anyul@email.com>",

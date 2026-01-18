@@ -232,6 +232,8 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       const latestItem = itemArray[0]
       const lastPubDate = parsePubDate(config, latestItem.pubDate)
 
+      debug(config, `${rssItem.title}: Latest item date=${lastPubDate.toISOString()}, DB date=${rssItem.lastPubDate ? new Date(rssItem.lastPubDate).toISOString() : 'none'}`, 'feeder', 'details')
+
       // Prepare content for deduplication
       const currentContent = config.basic?.resendUpdataContent === 'all'
         ? itemArray.map((i: any) => getLastContent(i, config))
@@ -247,14 +249,21 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       if (rssItem.arg.forceLength) {
         // Force length mode: ignore time, just take N items
         rssItemArray = itemArray.slice(0, arg.forceLength)
+        debug(config, `${rssItem.title}: Force length mode, taking ${rssItemArray.length} items`, 'feeder', 'details')
       } else {
         // Standard mode: Time & Content check
+        debug(config, `${rssItem.title}: Checking ${itemArray.length} items for updates`, 'feeder', 'details')
         rssItemArray = itemArray.filter((v, i) => {
           const currentItemTime = parsePubDate(config, v.pubDate).getTime()
-          const lastTime = rssItem.lastPubDate ? new Date(rssItem.lastPubDate).getTime() : 0
+          const lastTime = rssItem.lastPubDate ? parsePubDate(config, rssItem.lastPubDate).getTime() : 0
+
+          debug(config, `[${i}] ${v.title?.substring(0, 30)}: time=${new Date(currentItemTime).toISOString()} > last=${new Date(lastTime).toISOString()} ? ${currentItemTime > lastTime}`, 'feeder', 'details')
 
           // Strict time check
-          if (currentItemTime > lastTime) return true
+          if (currentItemTime > lastTime) {
+            debug(config, `[${i}] ✓ Item is new (time check)`, 'feeder', 'details')
+            return true
+          }
 
           // Content hash check (if time is same but content changed)
           if (config.basic?.resendUpdataContent !== 'disable') {
@@ -266,9 +275,18 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
 
             if (oldItemMatch) {
               // If description changed, it's an update
-              return JSON.stringify(oldItemMatch.description) !== JSON.stringify(newItemContent.description)
+              const descriptionChanged = JSON.stringify(oldItemMatch.description) !== JSON.stringify(newItemContent.description)
+              if (descriptionChanged) {
+                debug(config, `[${i}] ✓ Item is updated (content changed)`, 'feeder', 'details')
+              } else {
+                debug(config, `[${i}] ✗ Item filtered (already sent)`, 'feeder', 'details')
+              }
+              return descriptionChanged
+            } else {
+              debug(config, `[${i}] ✗ Item filtered (no match in lastContent)`, 'feeder', 'details')
             }
           }
+          debug(config, `[${i}] ✗ Item filtered (failed all checks)`, 'feeder', 'details')
           return false
         })
 
@@ -279,6 +297,7 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       }
 
       if (rssItemArray.length === 0) {
+        debug(config, `${rssItem.title}: No new items found after filtering`, 'feeder', 'info')
         // No new items, but we should still update 'lastContent' to latest state to prevent future drifts
         await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, {
           lastPubDate,
@@ -299,6 +318,7 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       )).filter(m => m) // Filter empty messages
 
       if (messageList.length === 0) {
+        debug(config, `${rssItem.title}: Items found but parsed to empty messages`, 'feeder', 'info')
         // Items found but parsed to empty (e.g. filtered by video mode)
         await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { lastPubDate, arg: originalArg, lastContent: { itemArray: currentContent } })
         continue
@@ -327,29 +347,49 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       try {
         debug(config, `Sending update for ${rssItem.title} to ${rssItem.platform}:${rssItem.guildId}`, 'feeder', 'details')
 
-        // 检查 bot 是否可用
-        const bot = ctx.bots.find(bot => bot.platform === rssItem.platform && bot.selfId === rssItem.author)
-        if (!bot) {
-          debug(config, `Bot not found for ${rssItem.platform}:${rssItem.author}, skipping broadcast`, 'feeder', 'info')
-          // 即使 bot 不可用，也要更新数据库状态
-          await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, {
-            lastPubDate,
-            arg: originalArg,
-            lastContent: { itemArray: currentContent }
-          })
-          continue
+        // Koishi broadcast 会自动查找可用的 bot，无需手动检查
+        // author 字段兼容用户ID和bot selfId两种格式
+        // 发送消息
+        try {
+          await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
+          debug(config, `更新成功:${rssItem.title}`, '', 'info')
+        } catch (sendError: any) {
+          // OneBot retcode 1200: 不支持的消息格式（通常是视频）
+          if (sendError.code?.toString?.() === '1200' || sendError.message?.includes('1200')) {
+            debug(config, `消息格式不被支持，尝试清理视频元素后重试: ${rssItem.title}`, 'feeder', 'info')
+
+            // 移除 video 元素，保留视频链接
+            const fallbackMessage = message
+              .replace(/<video[^>]*>.*?<\/video>/gis, (match: string) => {
+                // 提取视频 URL
+                const srcMatch = match.match(/src=["']([^"']+)["']/)
+                if (srcMatch) {
+                  return `\n🎬 视频: ${srcMatch[1]}\n`
+                }
+                return '\n[视频不支持]\n'
+              })
+
+            try {
+              await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], fallbackMessage)
+              debug(config, `降级发送成功:${rssItem.title}`, '', 'info')
+            } catch (retryError: any) {
+              debug(config, `降级发送也失败: ${retryError.message}`, 'feeder', 'error')
+              throw retryError
+            }
+          } else {
+            throw sendError
+          }
         }
 
-        // 发送消息
-        await ctx.broadcast([`${rssItem.platform}:${rssItem.guildId}`], message)
-        debug(config, `更新成功:${rssItem.title}`, '', 'info')
-
-        // 缓存消息
-        if (config.cache?.enabled && currentContent.length > 0) {
+        // 缓存最终发送的消息
+        if (config.cache?.enabled && messageList.length > 0) {
           const cache = getMessageCache()
           if (cache) {
-            // 缓存每条消息
-            for (const item of currentContent) {
+            // 缓存每条消息的最终形式
+            for (let i = 0; i < itemsToSend.length && i < messageList.length; i++) {
+              const item = itemsToSend[i]
+              const finalMsg = messageList[i]
+
               try {
                 await cache.addMessage({
                   rssId: rssItem.rssId.toString(),
@@ -360,7 +400,8 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
                   link: item.link || '',
                   pubDate: parsePubDate(config, item.pubDate),
                   imageUrl: item.enclosure?.url || '',
-                  videoUrl: ''
+                  videoUrl: '',
+                  finalMessage: finalMsg // 缓存最终发送的消息
                 })
               } catch (err) {
                 debug(config, `缓存消息失败: ${err.message}`, 'cache', 'info')

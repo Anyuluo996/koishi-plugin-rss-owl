@@ -138,9 +138,18 @@ export const getVideoUrl = async (
 ): Promise<string> => {
   let src = dom.attribs.src || dom.children["0"].attribs.src
 
-  // href 模式：直接返回视频链接
-  if (config.basic.videoMode == "href") {
-    return src
+  // 根据发送模式处理
+  const videoMode = config.basic.videoMode
+
+  // filter 模式：过滤掉所有视频
+  if (videoMode === 'filter') {
+    debug(config, `视频已过滤 (videoMode=filter)`, 'video filter', 'details')
+    return ''
+  }
+
+  // href 模式：返回特殊标记，不创建 video 元素
+  if (videoMode === 'href') {
+    return `__VIDEO_LINK__:${src}`
   }
 
   // 显示代理状态
@@ -176,16 +185,13 @@ export const getVideoUrl = async (
   let base64Prefix = `data:${contentType};base64,`
   let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
 
-  // 根据发送模式处理
-  const videoMode = config.basic.videoMode
-
   // base64 模式：直接返回 base64（注意：视频 base64 可能非常长）
-  if (videoMode == 'base64' || useBase64Mode) {
+  if (videoMode === 'base64' || useBase64Mode) {
     return base64Data
   }
 
   // File 模式：下载到本地，返回 file:// URL
-  if (videoMode == "File") {
+  if (videoMode === 'File') {
     let fileUrl = await writeCacheFile(base64Data, config)
     return fileUrl
   }

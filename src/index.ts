@@ -124,10 +124,12 @@ export function apply(ctx: Context, config: Config) {
 
       const { id: guildId } = session.event.guild as any
       const { platform } = session.event as any
-      const { id: author } = session.event.user as any
+      const { id: userId } = session.event.user as any
       const { authority } = session.user as any
+      // 获取 bot selfId 用于后续推送
+      const botSelfId = session.bot?.selfId
 
-      debugLocal(`${platform}:${author}:${guildId}`, '', 'info')
+      debugLocal(`${platform}:${userId}:${guildId}, bot:${botSelfId}`, '', 'info')
       if (options?.quick === '') {
         return '输入 rsso -q [id] 查询详情\n' + quickList.map((v, i) => `${i + 1}.${v.name}`).join('\n')
       }
@@ -172,8 +174,8 @@ export function apply(ctx: Context, config: Config) {
         let rssItem = findRssItemLocal(rssList, options.follow)
         if (!rssItem) return '未找到该订阅'
         if (!rssItem.followers) rssItem.followers = []
-        if (rssItem.followers.includes(author)) return '已经关注过了'
-        rssItem.followers.push(author)
+        if (rssItem.followers.includes(userId)) return '已经关注过了'
+        rssItem.followers.push(userId)
         await ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { followers: rssItem.followers })
         return '关注成功'
       }
@@ -209,7 +211,8 @@ export function apply(ctx: Context, config: Config) {
 
       if (url) {
         if (rssList.find(i => i.url == url)) return '该订阅已存在'
-        let arg = formatArgLocal(options)
+        let rawArg = formatArgLocal(options)
+        let arg = mixinArgLocal(rawArg)
         let targetPlatform = platform
         let targetGuildId = guildId
         if (options?.target) {
@@ -237,7 +240,7 @@ export function apply(ctx: Context, config: Config) {
             if (!testArg.template) {
               testArg.template = config.basic.defaultTemplate
             }
-            let msg = await parseRssItem(testItem, testArg, author)
+            let msg = await parseRssItem(testItem, testArg, userId)
             return msg
           }
           if (!title) {
@@ -249,14 +252,13 @@ export function apply(ctx: Context, config: Config) {
             url,
             platform: targetPlatform,
             guildId: targetGuildId,
-            author,
+            author: botSelfId,
             rssId: rssItemList[0]?.rss?.channel?.title ? rssItemList[0].rss.channel.title : title,
-            arg,
+            arg: rawArg,
             title,
             lastPubDate,
             lastContent: [],
-            followers: [],
-            firstime: lastPubDate
+            followers: []
           }
           if (options.force) {
             if (authority < config.basic.authority) return '权限不足'
@@ -268,7 +270,9 @@ export function apply(ctx: Context, config: Config) {
             let itemArray = rssItemList.sort((a, b) => parsePubDateLocal(b.pubDate).getTime() - parsePubDateLocal(a.pubDate).getTime())
             if (arg.reverse) itemArray = itemArray.reverse()
             const maxItem = arg.forceLength || 1
-            let messageList = await Promise.all(itemArray.filter((v, i) => i < maxItem).map(async i => await parseRssItem(i, { ...rssItem, ...rssItem.arg }, rssItem.author)))
+            // 使用合并后的配置来确保图片/视频模式生效
+            const mergedArg = mixinArgLocal(rssItem.arg)
+            let messageList = await Promise.all(itemArray.filter((v, i) => i < maxItem).map(async i => await parseRssItem(i, { ...rssItem, ...mergedArg }, rssItem.author)))
             let message = messageList.join("")
             await ctx.broadcast([`${targetPlatform}:${targetGuildId}`], message)
           }
@@ -313,10 +317,12 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
 
       const { id: guildId } = session.event.guild as any
       const { platform } = session.event as any
-      const { id: author } = session.event.user as any
+      const { id: userId } = session.event.user as any
+      // 获取 bot selfId 用于后续推送
+      const botSelfId = session.bot?.selfId
 
       url = ensureUrlProtocol(url)
-      let arg: any = {
+      let rawArg: any = {
         type: 'html' as const,
         selector: options.selector,
         template: options.template || 'content',
@@ -326,6 +332,7 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
         waitSelector: options.waitSelector,
         title: options.title
       }
+      let arg = mixinArgLocal(rawArg)
 
       try {
         // Test mode: just preview the data
@@ -360,14 +367,13 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
           url,
           platform,
           guildId,
-          author,
+          author: botSelfId,
           rssId: title, // Use title as rssId for HTML monitoring
-          arg,
+          arg: rawArg,
           title,
           lastPubDate: new Date(), // HTML monitoring doesn't have real timestamps
           lastContent: [],
-          followers: [],
-          firstime: new Date()
+          followers: []
         }
 
         // Check for duplicate (if enabled)
@@ -381,10 +387,12 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
         // First load preview (if enabled)
         if (config.basic.firstLoad && arg.firstLoad !== false && htmlItems.length > 0) {
           const maxItem = arg.forceLength || 1
+          // 使用合并后的配置来确保图片/视频模式生效
+          const mergedArg = mixinArgLocal(rssItem.arg)
           let messageList = await Promise.all(
             htmlItems
               .filter((v, i) => i < maxItem)
-              .map(async i => await parseRssItem(i, { ...rssItem, ...rssItem.arg }, rssItem.author))
+              .map(async i => await parseRssItem(i, { ...rssItem, ...mergedArg }, rssItem.author))
           )
           let message = messageList.join("")
           await ctx.broadcast([`${platform}:${guildId}`], message)
@@ -464,17 +472,20 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
 
       const { id: guildId } = session.event.guild as any
       const { platform } = session.event as any
-      const { id: author } = session.event.user as any
+      const { id: userId } = session.event.user as any
+      // 获取 bot selfId 用于后续推送
+      const botSelfId = session.bot?.selfId
 
       url = ensureUrlProtocol(url)
 
-      let arg: any = {
+      let rawArg: any = {
         type: 'html' as const,
         selector: keyword ? `*:contains("${keyword}")` : 'body',
         textOnly: !!keyword,
         mode: options.puppeteer ? 'puppeteer' : 'static',
         template: 'content' as const
       }
+      let arg = mixinArgLocal(rawArg)
 
       try {
         if (options.test) {
@@ -504,6 +515,8 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
   rsso.cache list [页数]              - 查看缓存消息列表
   rsso.cache search <关键词>          - 搜索缓存消息
   rsso.cache stats                    - 查看缓存统计
+  rsso.cache message <序号>           - 查看消息详情
+  rsso.cache pull <序号>             - 重新推送缓存消息
   rsso.cache clear                    - 清空所有缓存
   rsso.cache cleanup [保留数量]       - 清理缓存（保留最新N条）
 
@@ -512,7 +525,11 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
   rsso.cache list 2                   - 查看第2页
   rsso.cache search 新闻              - 搜索包含"新闻"的消息
   rsso.cache stats                    - 查看统计信息
+  rsso.cache message 1                - 查看序号1的消息详情
+  rsso.cache pull 1                  - 推送序号1的消息
   rsso.cache cleanup 50               - 清理并保留最新50条
+
+注意：序号从1开始，会在列表中显示对应的真实数据库ID
     `)
     .action(async ({ session, options }, subcommand, ...args) => {
       const { authority } = session.user as any
@@ -531,6 +548,8 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
   rsso.cache list [页数]              - 查看缓存消息列表
   rsso.cache search <关键词>          - 搜索缓存消息
   rsso.cache stats                    - 查看缓存统计
+  rsso.cache message <序号>           - 查看消息详情
+  rsso.cache pull <序号>             - 重新推送缓存消息
   rsso.cache clear                    - 清空所有缓存
   rsso.cache cleanup [保留数量]       - 清理缓存（保留最新N条）
 
@@ -566,11 +585,14 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
                 minute: '2-digit'
               })
               const title = msg.title.length > 30 ? msg.title.substring(0, 30) + '...' : msg.title
-              return `${index + 1 + offset}. [${msg.rssId}] ${title}\n   时间: ${date}\n   链接: ${msg.link}`
+              // 显示序号，在括号中显示真实ID
+              const serialNumber = index + 1
+              return `${serialNumber}. [ID:${msg.id}] [${msg.rssId}] ${title}\n   时间: ${date}\n   链接: ${msg.link}`
             }).join('\n\n')
 
             output += `\n\n💡 使用 "rsso.cache list ${page + 1}" 查看下一页`
-            output += `\n💡 使用 "rsso.cache message ${messages[0].id}" 查看详情`
+            output += `\n💡 使用 "rsso.cache pull <序号>" 推送消息（注意：序号基于当前页）`
+            output += `\n💡 使用 "rsso.cache message <序号>" 查看详情`
 
             return output
           } catch (error: any) {
@@ -580,27 +602,50 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
         }
 
         case 'message': {
-          const messageId = parseInt(args[0])
+          const serialNumber = parseInt(args[0])
 
-          if (!messageId) {
-            return '请提供消息ID\n使用方法: rsso.cache message <消息ID>'
+          if (!serialNumber || serialNumber < 1) {
+            return '请提供序号\n使用方法: rsso.cache message <序号>\n示例: rsso.cache message 1\n💡 提示：使用 "rsso.cache list" 查看序号'
           }
 
           try {
-            const message = await cache.getMessage(messageId)
+            // 通过序号查找消息（与pull命令相同的逻辑）
+            const limit = 10
+            const maxPagesToSearch = 10
+            let foundMessage = null
+            let actualPage = 1
+            let targetSerialNumber = serialNumber
 
-            if (!message) {
-              return `未找到 ID 为 ${messageId} 的消息`
+            for (let page = 1; page <= maxPagesToSearch; page++) {
+              const offset = (page - 1) * limit
+              const messages = await cache.getMessages({
+                limit,
+                offset
+              })
+
+              if (messages.length === 0) break
+
+              if (targetSerialNumber <= messages.length) {
+                foundMessage = messages[targetSerialNumber - 1]
+                actualPage = page
+                break
+              }
+
+              targetSerialNumber -= messages.length
             }
 
-            const pubDate = new Date(message.pubDate).toLocaleString('zh-CN', {
+            if (!foundMessage) {
+              return `❌ 未找到序号为 ${args[0]} 的消息\n💡 使用 "rsso.cache list" 查看可用的序号`
+            }
+
+            const pubDate = new Date(foundMessage.pubDate).toLocaleString('zh-CN', {
               year: 'numeric',
               month: '2-digit',
               day: '2-digit',
               hour: '2-digit',
               minute: '2-digit'
             })
-            const createdAt = new Date(message.createdAt).toLocaleString('zh-CN', {
+            const createdAt = new Date(foundMessage.createdAt).toLocaleString('zh-CN', {
               year: 'numeric',
               month: '2-digit',
               day: '2-digit',
@@ -608,27 +653,27 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
               minute: '2-digit'
             })
 
-            let output = `📰 消息详情 #${message.id}\n\n`
-            output += `📰 标题: ${message.title}\n`
-            output += `📡 订阅: ${message.rssId}\n`
-            output += `👥 群组: ${message.platform}:${message.guildId}\n`
-            output += `🔗 链接: ${message.link}\n`
+            let output = `📰 消息详情 (第${actualPage}页序号${args[0]}，真实ID:${foundMessage.id})\n\n`
+            output += `📰 标题: ${foundMessage.title}\n`
+            output += `📡 订阅: ${foundMessage.rssId}\n`
+            output += `👥 群组: ${foundMessage.platform}:${foundMessage.guildId}\n`
+            output += `🔗 链接: ${foundMessage.link}\n`
             output += `📅 发布时间: ${pubDate}\n`
             output += `💾 缓存时间: ${createdAt}\n`
 
-            if (message.content) {
-              const content = message.content.length > 200
-                ? message.content.substring(0, 200) + '...'
-                : message.content
+            if (foundMessage.content) {
+              const content = foundMessage.content.length > 200
+                ? foundMessage.content.substring(0, 200) + '...'
+                : foundMessage.content
               output += `\n📝 内容:\n${content}`
             }
 
-            if (message.imageUrl) {
-              output += `\n\n🖼️ 图片: ${message.imageUrl}`
+            if (foundMessage.imageUrl) {
+              output += `\n\n🖼️ 图片: ${foundMessage.imageUrl}`
             }
 
-            if (message.videoUrl) {
-              output += `\n\n🎬 视频: ${message.videoUrl}`
+            if (foundMessage.videoUrl) {
+              output += `\n\n🎬 视频: ${foundMessage.videoUrl}`
             }
 
             return output
@@ -665,10 +710,11 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
                 minute: '2-digit'
               })
               const title = msg.title.length > 30 ? msg.title.substring(0, 30) + '...' : msg.title
-              return `${index + 1}. [${msg.rssId}] ${title}\n   时间: ${date}\n   ID: ${msg.id}`
+              // 搜索结果显示序号和真实ID
+              return `${index + 1}. [ID:${msg.id}] [${msg.rssId}] ${title}\n   时间: ${date}`
             }).join('\n\n')
 
-            output += `\n\n💡 使用 "rsso.cache message <ID>" 查看详情`
+            output += `\n\n💡 使用 "rsso.cache message <真实ID>" 查看详情`
 
             return output
           } catch (error: any) {
@@ -757,6 +803,66 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
           } catch (error: any) {
             debugLocal(error, 'cache cleanup error', 'error')
             return `清理缓存失败: ${error.message}`
+          }
+        }
+
+        case 'pull': {
+          const serialNumber = parseInt(args[0])
+
+          if (!serialNumber || serialNumber < 1) {
+            return '请提供有效的序号\n使用方法: rsso.cache pull <序号>\n示例: rsso.cache pull 1\n💡 提示：使用 "rsso.cache list" 查看序号'
+          }
+
+          try {
+            // 需要获取当前页的所有消息来找到对应的序号
+            // 默认从第1页开始查找
+            const limit = 10
+            const maxPagesToSearch = 10 // 最多搜索10页
+            let foundMessage = null
+            let actualPage = 1
+            let targetSerialNumber = serialNumber // 可修改的副本
+
+            for (let page = 1; page <= maxPagesToSearch; page++) {
+              const offset = (page - 1) * limit
+              const messages = await cache.getMessages({
+                limit,
+                offset
+              })
+
+              if (messages.length === 0) break
+
+              // 检查当前页是否有该序号
+              if (targetSerialNumber <= messages.length) {
+                foundMessage = messages[targetSerialNumber - 1]
+                actualPage = page
+                break
+              }
+
+              // 序号不在当前页，继续下一页
+              targetSerialNumber -= messages.length
+            }
+
+            if (!foundMessage) {
+              return `❌ 未找到序号为 ${args[0]} 的消息\n💡 使用 "rsso.cache list" 查看可用的序号`
+            }
+
+            // 检查是否有缓存的最终消息
+            if (!foundMessage.finalMessage) {
+              return `❌ 该消息没有缓存的最终消息\n💡 这条消息可能是旧版本缓存，请重新订阅后重试`
+            }
+
+            // 获取当前群组信息
+            const { id: guildId } = session.event.guild as any
+            const { platform } = session.event as any
+
+            // 直接发送缓存的最终消息
+            await ctx.broadcast([`${platform}:${guildId}`], foundMessage.finalMessage)
+
+            // 返回空字符串，不额外显示提示信息
+            return ''
+          } catch (error: any) {
+            debugLocal(error, 'cache pull error', 'error')
+            return `推送消息失败: ${error.message}`
           }
         }
 

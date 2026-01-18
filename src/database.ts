@@ -7,7 +7,7 @@ export function setupDatabase(ctx: Context) {
     platform: "string",
     guildId: "string",
     author: "string",
-    rssId: "integer",
+    rssId: "string", // 修复：改为string类型，存储订阅标题
     arg: "json",
     lastContent: "json",
     title: "string",
@@ -29,6 +29,7 @@ export function setupDatabase(ctx: Context) {
     pubDate: "timestamp",
     imageUrl: "string",
     videoUrl: "string",
+    finalMessage: "text", // 最终发送的消息
     createdAt: "timestamp",
   }, {
     autoInc: true

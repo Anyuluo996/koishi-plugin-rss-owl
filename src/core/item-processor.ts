@@ -118,14 +118,14 @@ export class RssItemProcessor {
       case "custom":
         msg = await this.processCustomTemplate(item, arg, html, parseContent);
         await this.processVideos(html, arg, videoList);
-        msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
+        msg += this.formatVideoList(videoList);
         break;
 
       case "content":
         msg = await this.processContentTemplate(item, arg, html, parseContent);
         await this.processVideos(html, arg, videoList);
-        msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
-        msg += videoList.filter(([src, poster]) => poster).map(([src, poster]) => h('img', { src: poster })).join("");
+        msg += this.formatVideoList(videoList);
+        msg += videoList.filter(([src, poster]) => poster && !src.startsWith('__VIDEO_LINK__')).map(([src, poster]) => h('img', { src: poster })).join("");
         break;
 
       case "only text":
@@ -135,7 +135,7 @@ export class RssItemProcessor {
       case "only media":
         msg = await this.processOnlyMediaTemplate(item, arg, html);
         await this.processVideos(html, arg, videoList);
-        msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
+        msg += this.formatVideoList(videoList);
         break;
 
       case "only image":
@@ -144,7 +144,7 @@ export class RssItemProcessor {
 
       case "only video":
         await this.processVideos(html, arg, videoList);
-        msg = videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
+        msg = this.formatVideoList(videoList);
         break;
 
       case "proto":
@@ -154,13 +154,13 @@ export class RssItemProcessor {
       case "default":
         msg = await this.processDefaultTemplate(item, arg, html, parseContent);
         await this.processVideos(html, arg, videoList);
-        msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
+        msg += this.formatVideoList(videoList);
         break;
 
       case "only description":
         msg = await this.processOnlyDescriptionTemplate(item, arg, html, parseContent);
         await this.processVideos(html, arg, videoList);
-        msg += videoList.filter(([src]) => src).map(([src, poster]) => h('video', { src, poster })).join("");
+        msg += this.formatVideoList(videoList);
         break;
 
       case "link":
@@ -459,5 +459,17 @@ export class RssItemProcessor {
         (i.attribs.poster && this.config.basic?.usePoster) ? await getImageUrl(this.ctx, this.config, this.$http, i.attribs.poster, arg, true) : ""
       ])
     ).get());
+  }
+
+  private formatVideoList(videoList: any[]): string {
+    return videoList.filter(([src]) => src).map(([src, poster]) => {
+      // href 模式：返回视频链接文本
+      if (src.startsWith('__VIDEO_LINK__:')) {
+        const videoUrl = src.replace('__VIDEO_LINK__:', '')
+        return `\n🎬 视频: ${videoUrl}\n`
+      }
+      // 其他模式：创建 video 元素
+      return h('video', { src, poster })
+    }).join('')
   }
 }

@@ -24,6 +24,7 @@ export interface CachedMessage {
   pubDate: Date
   imageUrl?: string
   videoUrl?: string
+  finalMessage?: string // 最终发送的消息
   createdAt: Date
 }
 
