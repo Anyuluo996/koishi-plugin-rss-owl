@@ -144,9 +144,9 @@ body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     display: flex;
-    align-items: center;
     justify-content: center;
-    min-height: 100vh;
+    min-height: 100%;
+    box-sizing: border-box;
     margin: 0;
     padding: 20px;
 }

@@ -140,7 +140,8 @@ export async function renderHtml2Image(
     await page.setContent(htmlContent, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
     if (!config.basic.autoSplitImage) {
-      const image = await page.screenshot({ type: "png" })
+      // 使用 fullPage: true 让截图高度自适应实际内容
+      const image = await page.screenshot({ type: "png", fullPage: true })
       // assets 模式
       if (config.basic.imageMode === 'assets' && ctx.assets) {
         try {

@@ -18,6 +18,15 @@ let interval: any = null
 let queueInterval: any = null
 
 export function findRssItem(rssList: any[], keyword: number | string) {
+  // 优先匹配列表索引（用户看到的序号 1, 2, 3...）
+  if (typeof keyword === 'number' || /^\d+$/.test(String(keyword))) {
+    const listIndex = parseInt(String(keyword)) - 1  // 转换为数组索引（0-based）
+    if (listIndex >= 0 && listIndex < rssList.length) {
+      return rssList[listIndex]
+    }
+  }
+
+  // 其他匹配方式：按 rssId、url、title 等
   let index = ((rssList.findIndex(i => i.rssId === +keyword) + 1) ||
     (rssList.findIndex(i => i.url == keyword) + 1) ||
     (rssList.findIndex(i => i.url.indexOf(keyword) + 1) + 1) ||
