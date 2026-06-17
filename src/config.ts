@@ -200,10 +200,20 @@ export const Config: Schema<ConfigType> = Schema.object({
     enabled: Schema.boolean().description('启用错误追踪').default(false),
     dsn: Schema.string().role('secret').description('Sentry DSN').default(''),
     environment: Schema.string().description('错误追踪环境').default('production'),
-    release: Schema.string().description('错误追踪版本号').default('5.2.3'),
+    release: Schema.string().description('错误追踪版本号').default('5.2.45'),
     tracesSampleRate: Schema.number().min(0).max(1).description('性能追踪采样率').default(0.1),
     profilesSampleRate: Schema.number().min(0).max(1).description('性能分析采样率').default(0.1),
   }).description('错误追踪设置'),
+  tdl: Schema.object({
+    enabled: Schema.boolean().description('启用 Telegram 大视频 tdl 兜底下载<br>当 RSSHub 返回 "Video is too big" 占位时，调用外部 tdl 直接从 Telegram 拉取原始视频。<br><b>需宿主机自行安装</b>: `go install github.com/iyear/tdl@latest` 或下载 [Release](https://github.com/iyear/tdl/releases)，并执行 `tdl login` 完成登录。<br>插件运行时探测 PATH，缺失则跳过、不阻塞主流程。').default(false),
+    binPath: Schema.string().description('tdl 二进制路径，默认从 PATH 探测<br>Docker/容器场景下若 tdl 装在持久卷（如 /koishi/bin/tdl），在此指定可避免依赖容器 PATH').default(''),
+    storage: Schema.string().description('tdl 会话存储路径（bolt 存储的 data 目录）<br>登录与下载必须指向同一路径，否则下载时找不到会话<br>容器持久卷示例: /koishi/.tdl/data').default(''),
+    proxy: Schema.string().role('link').description('tdl/ffmpeg 子进程专用代理，形如 http://host:port 或 socks5://host:port<br>为空则回退到订阅级代理').default(''),
+    timeout: Schema.number().min(30).max(1800).description('tdl 单次下载超时（秒）').default(180),
+    compressThreshold: Schema.number().min(1).description('触发 ffmpeg 压缩的体积阈值（MB），默认沿用基础设置中的视频最大体积').default(30),
+    crf: Schema.number().min(18).max(32).description('ffmpeg 压缩质量 CRF（18 接近无损体积大，32 体积小质量差）。ffmpeg 路径来自 Koishi 的 ffmpeg 服务（koishi-plugin-ffmpeg），未安装该服务则大视频会被跳过').default(30),
+    proxyByEnv: Schema.boolean().description('是否把订阅级代理通过 --proxy 透传给 tdl 子进程（当上方 proxy 为空时生效）').default(true),
+  }).description('Telegram 大视频（tdl）设置'),
 })
 
 // 导出 ConfigType 作为类型别名，供其他模块使用

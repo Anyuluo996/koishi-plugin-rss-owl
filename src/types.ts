@@ -9,6 +9,16 @@ declare module 'koishi' {
   }
 }
 
+// ffmpeg 服务类型声明（由 koishi-plugin-ffmpeg 提供，可选注入）
+// 仅用到 .executable（ffmpeg 二进制路径）；完整 FFmpeg 服务还有 builder 等能力
+declare module 'koishi' {
+  interface Context {
+    ffmpeg?: {
+      executable: string
+    }
+  }
+}
+
 declare module 'koishi' {
   interface rssOwl {
     id: string | number
@@ -50,6 +60,7 @@ export interface Config {
   debug?: "disable"|"error"|"info"|"details"
   logging?: LoggingConfig
   errorTracking?: ErrorTrackingConfig
+  tdl?: TdlConfig
 }
 
 export const debugLevel = ["disable","error","info","details"]
@@ -253,6 +264,27 @@ export interface SearchConfig {
   tavily?: TavilyConfig  // Tavily 配置
   searxng?: SearxngConfig  // SearXNG 配置
   volcengine?: VolcengineConfig  // 火山引擎配置
+}
+
+/**
+ * tdl（Telegram Downloader）配置
+ *
+ * tdl 是 iyear/tdl 提供的 Go 编写独立 CLI 工具，**不是 npm 包**。
+ * 当 RSSHub 对 Telegram 超大视频返回 "Video is too big" 占位时，
+ * 通过 tdl 直接从 Telegram 拉取原始视频，再按需用 ffmpeg 压缩后发送。
+ *
+ * 需用户在宿主机自行安装 tdl、ffmpeg 并完成 `tdl login`；
+ * 插件运行时探测 PATH，缺失则跳过、绝不阻塞主流程。
+ */
+export interface TdlConfig {
+  enabled?: boolean            // 是否启用 tdl 兜底下载（默认 false）
+  timeout?: number             // tdl 单次下载超时（秒，默认 180）
+  compressThreshold?: number   // 触发 ffmpeg 压缩的体积阈值（MB，默认沿用 basic.maxVideoSize=30）
+  crf?: number                 // ffmpeg CRF 质量（18-32，越小质量越好体积越大，默认 30）
+  proxyByEnv?: boolean         // 是否把订阅级代理透传给 tdl 子进程（默认 true）
+  proxy?: string               // tdl/ffmpeg 子进程专用代理，形如 http://host:port；为空则用订阅级代理或全局代理
+  storage?: string             // tdl 会话存储路径，如 /koishi/.tdl/data；登录与下载需一致，否则找不到会话
+  binPath?: string             // tdl 二进制路径，默认从 PATH 探测；容器持久卷场景可指定如 /koishi/bin/tdl
 }
 
 /**

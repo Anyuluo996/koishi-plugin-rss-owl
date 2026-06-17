@@ -14,6 +14,8 @@ export const name = '@anyul/koishi-plugin-rss'
 import { createHttpFunction, RequestManager } from './utils/fetcher'
 import { delCache } from './utils/media'
 import { initErrorTracker } from './utils/error-tracker'
+import { resolveTdlBinary } from './utils/tdl'
+import { debug as debugLog } from './utils/logger'
 import {
   createCommandRuntimeDeps,
   registerManagementCommands,
@@ -34,11 +36,25 @@ import { NotificationQueueManager } from './core/notification-queue'
 import { setupDatabase } from './database'
 import { usage, quickList } from './constants'
 
-export const inject = { required: ["database"], optional: ["puppeteer", "censor", "assets", "server"] }
+export const inject = { required: ["database"], optional: ["puppeteer", "censor", "assets", "server", "ffmpeg"] }
 
 export function apply(ctx: Context, config: Config) {
   // Setup database
   setupDatabase(ctx)
+
+  // 启用时探测 tdl 外部二进制可用性，并报告 Koishi ffmpeg 服务注入状态，便于用户排查
+  // 探测异步进行、失败仅打日志，不阻塞插件加载
+  // 注意：tdl 的版本命令是 `version` 子命令，不是 `-v` flag
+  if (config.tdl?.enabled) {
+    resolveTdlBinary(config).then((tdlBin) => {
+      const hasTdl = !!tdlBin
+      const tdlLoc = tdlBin ? ` (${tdlBin === 'tdl' ? 'PATH' : tdlBin})` : ''
+      const ffmpegStatus = ctx.ffmpeg?.executable
+        ? `✓ (${ctx.ffmpeg.executable})`
+        : '✗（请安装 koishi-plugin-ffmpeg 插件）'
+      debugLog(config, `Telegram 大视频工具探测：tdl=${hasTdl ? '✓' + tdlLoc : '✗（请安装 iyear/tdl 并 tdl login）'}，ffmpeg=${ffmpegStatus}`, 'tdl', 'info')
+    }).catch(() => { /* 探测失败忽略 */ })
+  }
 
   if (config.errorTracking?.enabled) {
     initErrorTracker({

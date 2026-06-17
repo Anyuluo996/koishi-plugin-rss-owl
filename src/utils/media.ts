@@ -1,5 +1,5 @@
 import { Context } from 'koishi'
-import { pathToFileURL } from 'url'
+import { pathToFileURL, fileURLToPath } from 'url'
 import * as fs from 'fs'
 import * as path from 'path'
 import { Config, rssArg } from '../types'
@@ -158,31 +158,54 @@ export const getVideoUrl = async (
   debug(config, `[DEBUG_PROXY] media getVideoUrl arg.proxyAgent: ${JSON.stringify(arg?.proxyAgent)}`, 'video proxy', 'details')
   debug(config, `视频下载模式: ${proxyStatus}`, 'video proxy', 'details')
 
-  let res
+  // 获取视频字节与 content-type：
+  // - data:/file: 本地协议直接读取，跳过 $http 与代理（用于 tdl 兜底下载的视频）
+  // - 其它走 HTTP 下载
+  let bufferData: Buffer
+  let contentType: string
   try {
-    // 视频文件可能较大，增加超时时间到 120 秒
-    res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 120000 })
+    if (src.startsWith('data:')) {
+      // data URL 直接解析（tdl 流程已注入）
+      const match = src.match(/^data:([^;]+)?;base64,(.*)$/s)
+      if (!match) {
+        debug(config, `data URL 格式无效，跳过该视频`, 'video error', 'error')
+        return ''
+      }
+      contentType = match[1] || 'video/mp4'
+      bufferData = Buffer.from(match[2], 'base64')
+      debug(config, `视频来自 data URL（本地），大小: ${(bufferData.length / 1024 / 1024).toFixed(2)} MB`, 'video download', 'details')
+    } else if (/^file:/i.test(src)) {
+      // file:// 直接读取本地文件（tdl 流程已注入）
+      const filePath = fileURLToPath(src)
+      const stat = fs.statSync(filePath)
+      bufferData = fs.readFileSync(filePath)
+      contentType = 'video/mp4'
+      debug(config, `视频来自本地文件: ${filePath}，大小: ${(bufferData.length / 1024 / 1024).toFixed(2)} MB`, 'video download', 'details')
+      void stat
+    } else {
+      const res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 120000 })
+      bufferData = Buffer.from(res.data, 'binary')
+      contentType = res.headers["content-type"] || 'video/mp4'
+      debug(config, `视频下载成功，大小: ${(bufferData.length / 1024 / 1024).toFixed(2)} MB`, 'video download', 'details')
+    }
 
-    // 检查文件大小限制
+    // 检查文件大小限制（统一适用于本地与远程）
     const maxSize = (config.basic.maxVideoSize || 30) * 1024 * 1024 // 转换为字节
-    const contentLength = res.data.length
+    const contentLength = bufferData.length
     const sizeMB = (contentLength / 1024 / 1024).toFixed(2)
 
     if (contentLength > maxSize) {
       debug(config, `视频文件过大 (${sizeMB} MB)，超过限制 ${config.basic.maxVideoSize} MB，跳过该视频`, 'video size', 'info')
       return ''
     }
-
-    debug(config, `视频下载成功，大小: ${sizeMB} MB`, 'video download', 'details')
   } catch (error) {
-    debug(config, `视频请求失败: ${error}`, 'video error', 'error')
+    debug(config, `视频获取失败: ${error}`, 'video error', 'error')
     return ''
   }
 
-  let contentType = res.headers["content-type"] || 'video/mp4'
   let suffix = contentType?.split('/')[1] || 'mp4'
   let base64Prefix = `data:${contentType};base64,`
-  let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
+  let base64Data = base64Prefix + bufferData.toString('base64')
 
   // base64 模式：直接返回 base64（注意：视频 base64 可能非常长）
   if (videoMode === 'base64' || useBase64Mode) {

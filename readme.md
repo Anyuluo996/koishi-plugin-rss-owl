@@ -529,6 +529,45 @@ basic:
   usePoster: true         # 使用视频封面
 ```
 
+### Telegram 大视频兼容（tdl 兜底）
+
+订阅 Telegram 频道时，RSSHub 对超大视频会返回 `Video is too big` 占位（仅一张封面图），插件原本拿不到视频链接。开启 tdl 兜底后，插件会用外部工具 [iyear/tdl](https://github.com/iyear/tdl) 直接从 Telegram 拉取原始视频，超过阈值再用 ffmpeg 压缩后发送。
+
+**前置准备（宿主机一次性操作）：**
+
+1. 安装 tdl（Go 编写的独立 CLI，**不是 npm 包**）：
+   ```bash
+   # 方式一：Go 安装
+   go install github.com/iyear/tdl@latest
+   # 方式二：下载 Release 二进制
+   # https://github.com/iyear/tdl/releases
+   ```
+2. 安装 ffmpeg 服务（用于压缩，缺失则大视频会被跳过）：
+   推荐通过 Koishi 插件市场安装 `koishi-plugin-ffmpeg`（提供 `ctx.ffmpeg.executable`），
+   无需在宿主机手动装 ffmpeg。也可在容器内 `apt install ffmpeg`。
+3. 完成 tdl 登录（二维码或手机号）：
+   ```bash
+   tdl login
+   ```
+
+**配置：**
+
+```yaml
+tdl:
+  enabled: true              # 启用兜底下载（默认 false）
+  timeout: 180               # 单次下载超时（秒）
+  compressThreshold: 30      # 触发压缩的体积阈值（MB）
+  crf: 30                    # ffmpeg 质量 18-32，越小越清晰体积越大
+  proxyByEnv: true           # 把订阅级代理透传给 tdl 子进程
+```
+
+**行为说明：**
+- tdl **缺失时自动跳过**，不报错、不阻塞其它订阅推送。
+- ffmpeg 通过 Koishi 的 `ffmpeg` 服务（`koishi-plugin-ffmpeg`）提供路径；服务未注入时大视频会被跳过。
+- 下载与压缩产物落在插件缓存目录（`basic.cacheDir`），随定时器统一清理。
+- 发送方式复用 `basic.videoMode`，与普通视频一致。
+- 开启后启动日志会打印 tdl/ffmpeg 探测结果（`✓`/`✗`），便于排查。
+
 ## 🔐 权限说明
 
 ### 权限等级
@@ -678,6 +717,41 @@ debug: "details"  # 显示所有调试信息
 - 使用 `debug: details` 查看代理日志
 
 ## 📜 更新日志
+
+### 5.2.45 (2026-06-18)
+
+#### 修复 tdl 下载命令（实测验证）
+
+- 🐛 **修复 tdl 参数顺序** - 全局 flag（`--storage`/`--proxy`）必须放在子命令 `dl` 之前，否则 cobra 把它们当位置参数导致静默解析失败（之前下载会卡死无输出）
+- 🐛 **移除错误的 -f flag** - tdl 没有 force/no-confirm，`-f` 实为 `--file`（导出文件）会要参数报错
+- ✅ **实测通过** - 容器内用 `tdl --storage ... --proxy ... dl -u <link> -d <dir>` 成功下载 4MB 视频，1.66 MB/s
+
+### 5.2.44 (2026-06-18)
+
+#### 改用 Koishi ffmpeg 服务
+
+- 🔌 **复用 ffmpeg 服务** - 压缩不再自己探测 PATH，改为注入 Koishi 的 `ffmpeg` 服务（`ctx.ffmpeg.executable`，由 `koishi-plugin-ffmpeg` 提供），与其它视频插件（如 video-to-gif）共用同一 ffmpeg 安装
+- 🧩 **可选注入** - `ffmpeg` 加入 `inject.optional`，未装该服务时优雅跳过大视频、不报错
+- 🧹 **移除 detectBinary('ffmpeg')** - 避免与 ffmpeg 服务双路径探测的歧义
+
+### 5.2.43 (2026-06-18)
+
+#### 容器部署适配修复
+
+- 🐛 **修复 tdl 版本探测** - tdl 用 `version` 子命令而非 `-v` flag，旧实现会让 detectBinary 误判 tdl 不存在
+- 📁 **新增 tdl 配置项** - `binPath`（指定二进制路径，适配容器持久卷如 `/koishi/bin/tdl`）、`storage`（会话存储路径，登录与下载须一致）、`proxy`（专用代理）
+- 🔧 **会话持久化** - 下载时透传 `--storage` 与 `--proxy`，确保容器环境下会话从持久卷读取、走指定代理
+- 🎯 **探测逻辑优化** - `resolveTdlBinary` 优先用 binPath，启动日志显示 tdl 实际路径（PATH / 绝对路径）
+
+### 5.2.42 (2026-06-18)
+
+#### Telegram 大视频 tdl 兜底
+
+- 🎬 **Telegram 大视频兼容** - 订阅 Telegram 频道时，RSSHub 对超大视频返回的 `Video is too big` 占位，现可通过外部 [iyear/tdl](https://github.com/iyear/tdl) 直接从 Telegram 拉取原始视频
+- 📦 **ffmpeg 自动压缩** - 下载产物超阈值（默认 30MB）自动用 ffmpeg 压缩后再发送，降低带宽占用
+- 🔌 **外部二进制探测** - tdl/ffmpeg 为外部 CLI（非 npm 包），运行时探测 PATH，缺失自动跳过、不阻塞主流程
+- ♻️ **videoMode 复用** - 兜底视频走既有 `videoMode` 链路（base64/File/assets），行为与普通视频一致
+- 🧪 **新增单元测试** - 覆盖 `parseTelegramLink`、`detectVideoTooBig`、`shouldCompress` 等纯函数
 
 ### 5.2.3 (2026-03-10)
 
