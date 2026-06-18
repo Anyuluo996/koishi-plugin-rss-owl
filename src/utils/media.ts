@@ -5,6 +5,16 @@ import * as path from 'path'
 import { Config, rssArg } from '../types'
 import { debug } from './logger'
 
+/** 静默删除单个文件，文件为空或不存在/删除失败都不抛错 */
+async function tryUnlink(filePath: string | null): Promise<void> {
+  if (!filePath) return
+  try {
+    await fs.promises.unlink(filePath)
+  } catch {
+    // 忽略：文件可能已不存在或被并发清理
+  }
+}
+
 export const getCacheDir = (config: Config) => {
   let dir = config.basic.cacheDir ? path.resolve('./', config.basic.cacheDir || "") : `${__dirname}/cache`
   let mkdir = (path: string, deep = 2) => {
@@ -163,9 +173,11 @@ export const getVideoUrl = async (
   // - 其它走 HTTP 下载
   let bufferData: Buffer
   let contentType: string
+  // 若 src 是 file://（tdl 流程注入），读入内存后可删源文件，避免缓存目录堆积大视频
+  let localSourcePath: string | null = null
   try {
     if (src.startsWith('data:')) {
-      // data URL 直接解析（tdl 流程已注入）
+      // data URL 直接解析（当前 tdl 流程注入的是 file://，这里保留 data: 解析以备其它来源）
       const match = src.match(/^data:([^;]+)?;base64,(.*)$/s)
       if (!match) {
         debug(config, `data URL 格式无效，跳过该视频`, 'video error', 'error')
@@ -176,12 +188,12 @@ export const getVideoUrl = async (
       debug(config, `视频来自 data URL（本地），大小: ${(bufferData.length / 1024 / 1024).toFixed(2)} MB`, 'video download', 'details')
     } else if (/^file:/i.test(src)) {
       // file:// 直接读取本地文件（tdl 流程已注入）
+      // 用异步 readFile 避免阻塞事件循环（视频可能几十 MB）
       const filePath = fileURLToPath(src)
-      const stat = fs.statSync(filePath)
-      bufferData = fs.readFileSync(filePath)
+      bufferData = await fs.promises.readFile(filePath)
       contentType = 'video/mp4'
+      localSourcePath = filePath // 标记：读入内存后即可删，避免缓存堆积
       debug(config, `视频来自本地文件: ${filePath}，大小: ${(bufferData.length / 1024 / 1024).toFixed(2)} MB`, 'video download', 'details')
-      void stat
     } else {
       const res = await $http(src, arg, { responseType: 'arraybuffer', timeout: 120000 })
       bufferData = Buffer.from(res.data, 'binary')
@@ -196,12 +208,18 @@ export const getVideoUrl = async (
 
     if (contentLength > maxSize) {
       debug(config, `视频文件过大 (${sizeMB} MB)，超过限制 ${config.basic.maxVideoSize} MB，跳过该视频`, 'video size', 'info')
+      // 体积超限：删除 tdl 源文件，避免大文件堆积
+      await tryUnlink(localSourcePath)
       return ''
     }
   } catch (error) {
     debug(config, `视频获取失败: ${error}`, 'video error', 'error')
     return ''
   }
+
+  // file:// 已读入内存（bufferData），后续 base64/File/assets 都基于内存数据，
+  // 源文件不再需要 —— 立即删，避免几十 MB 视频在缓存目录堆积
+  await tryUnlink(localSourcePath)
 
   let suffix = contentType?.split('/')[1] || 'mp4'
   let base64Prefix = `data:${contentType};base64,`

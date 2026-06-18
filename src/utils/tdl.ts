@@ -11,7 +11,7 @@
  * - 二进制缺失走同一返回路径，上层无感知。
  */
 
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -25,6 +25,87 @@ const execFileAsync = promisify(execFile)
 
 /** 进程内二进制探测结果缓存，避免每条 RSS 都 fork 探测 */
 const binaryCache: Record<string, boolean> = {}
+
+/**
+ * 运行一个子进程，超时时强制杀死整个进程组。
+ *
+ * tdl 用 bolt 存储，进程被 SIGTERM 后有时不释放文件锁，导致后续所有 tdl
+ * 调用报 "Current database is used by another process"。本函数用 detached
+ * 模式 + 进程组 kill（POSIX：负 PID；Windows：taskkill /T）确保连子进程
+ * 一起清理，不残留锁。
+ *
+ * @returns 进程正常结束返回 { stdout, stderr }
+ * @throws 超时（会先强杀）、非 0 退出、启动失败
+ */
+export function runWithForcedKill(
+  bin: string,
+  args: string[],
+  opts: { timeoutMs: number; windowsHide?: boolean },
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      detached: true,           // 新建进程组，便于整组 kill
+      windowsHide: opts.windowsHide ?? true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    let timer: NodeJS.Timeout | null = null
+
+    const cleanup = () => {
+      if (timer) { clearTimeout(timer); timer = null }
+    }
+
+    const forceKill = () => {
+      try {
+        if (child.pid == null) return
+        if (process.platform === 'win32') {
+          // Windows: taskkill /T /F 杀进程树
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+        } else {
+          // POSIX: 负 PID 杀整个进程组
+          try { process.kill(-child.pid, 'SIGKILL') } catch {
+            try { child.kill('SIGKILL') } catch { /* ignore */ }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    child.stdout?.on('data', (d) => { stdout += d.toString() })
+    child.stderr?.on('data', (d) => { stderr += d.toString() })
+
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(err)
+    })
+
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (code === 0) resolve({ stdout, stderr })
+      else reject(new Error(`exit code ${code}${stderr ? ': ' + stderr.trim() : ''}`))
+    })
+
+    timer = setTimeout(() => {
+      // 超时：先强杀整个进程组，再 reject
+      forceKill()
+      // 给系统一点时间回收进程，再 resolve reject
+      setTimeout(() => {
+        if (!settled) {
+          settled = true
+          reject(new Error(`timeout after ${opts.timeoutMs}ms`))
+        }
+      }, 200)
+    }, opts.timeoutMs)
+  })
+}
 
 /**
  * 探测某个可执行文件是否存在于 PATH 中。
@@ -236,13 +317,16 @@ export async function downloadWithTdl(opts: DownloadWithTdlOptions): Promise<str
   debug(config, `调用 tdl 下载: ${label} ${args.join(' ')}（超时 ${timeoutSeconds}s）`, 'tdl', 'info')
 
   try {
-    await execFileAsync(tdlBin, args, {
-      timeout: timeoutSeconds * 1000,
-      maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true,
-    })
+    // 用 runWithForcedKill：超时强制杀整个进程组，避免 tdl 残留进程占着 bolt 锁
+    await runWithForcedKill(tdlBin, args, { timeoutMs: timeoutSeconds * 1000 })
   } catch (err: any) {
-    debug(config, `tdl 下载失败: ${err?.message || err}（可能未登录 tdl login，或消息不含可下载媒体，或 storage 路径与登录不一致）`, 'tdl', 'error')
+    const msg = err?.message || String(err)
+    // 高亮锁冲突，便于用户定位残留进程
+    if (/used by another process/i.test(msg)) {
+      debug(config, `tdl 报 bolt 锁冲突（有残留 tdl 进程未退出）：${msg}。建议在容器内 \`pkill -9 tdl\` 后重试`, 'tdl', 'error')
+    } else {
+      debug(config, `tdl 下载失败: ${msg}（可能未登录 tdl login，或消息不含可下载媒体，或 storage 路径与登录不一致）`, 'tdl', 'error')
+    }
     // 即便失败也清理临时目录
     await safeRemoveDir(workDir)
     return null
@@ -260,8 +344,11 @@ export async function downloadWithTdl(opts: DownloadWithTdlOptions): Promise<str
   return videoPath
 }
 
-/** 在目录中挑选体积最大的视频文件（mp4/mov/webm/mkv） */
+/** 在目录中挑选体积最大的视频文件。
+ *  Telegram 频道视频几乎都是 mp4；tdl 也会下载同消息的配图(.jpg)和描述(.json)，
+ *  白名单只认视频扩展名。若想更严格可只认 .mp4（Telegram 视频 99% 是 mp4）。 */
 function pickLargestVideo(dir: string): string | null {
+  // Telegram 视频 = mp4；保留 mov/webm/mkv/m4v 兼容极少数转码产物
   const videoExts = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v'])
   let best: { path: string; size: number } | null = null
   try {
@@ -304,7 +391,8 @@ function resolveProxyUrl(config: Config, proxyAgent?: proxyAgent): string {
   // 1. 专用代理
   if (config.tdl?.proxy) return config.tdl.proxy
 
-  // 2. 订阅级代理（仅当 proxyByEnv != false，沿用历史语义）
+  // 2. 订阅级代理（仅当 proxyByEnv != false；字段名沿用历史命名，
+  //    实际现在通过 --proxy flag 透传而非环境变量）
   const proxyByEnv = config.tdl?.proxyByEnv !== false
   if (proxyByEnv && proxyAgent?.enabled && proxyAgent.host && proxyAgent.port) {
     const auth = proxyAgent.auth?.enabled

@@ -12,16 +12,12 @@
  * 所有外部调用使用 execFile（非 shell），参数数组化。
  */
 
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 
 import { Config } from '../types'
 import { debug } from './logger'
-import { safeRemoveDir } from './tdl'
-
-const execFileAsync = promisify(execFile)
+import { safeRemoveDir, runWithForcedKill } from './tdl'
 
 const DEFAULT_COMPRESS_THRESHOLD_MB = 30
 const DEFAULT_CRF = 30
@@ -68,6 +64,12 @@ export function shouldCompress(filePath: string, config: Config): boolean {
  * 编码参数：libx264 + CRF(默认30) + veryfast + AAC 96k + faststart
  * 产物落在原文件同目录，文件名加 `.cmp` 后缀，避免覆盖原文件。
  *
+ * 容错策略（应对 Telegram 视频的各种边缘情况）：
+ *   1. 先用完整参数（视频+音频重编）压缩；
+ *   2. 若失败（可能源音频流异常编码、无声流的边缘场景），
+ *      自动降级为丢弃音频只压视频（-an），保证至少能发出无声视频；
+ *   3. 两次都失败才返回 null。
+ *
  * @param ffmpegExe ffmpeg 可执行路径（来自 ctx.ffmpeg.executable）
  * @returns 压缩成功返回新文件路径；失败返回 null
  */
@@ -79,7 +81,8 @@ async function runFfmpegCompress(inputPath: string, config: Config, ffmpegExe: s
   // 清理可能残留的输出文件
   try { fs.rmSync(outputPath, { force: true }) } catch { /* ignore */ }
 
-  const args = [
+  // 第一次：完整压缩（视频+音频重编）
+  const fullArgs = [
     '-y',
     '-i', inputPath,
     '-c:v', 'libx264',
@@ -91,16 +94,30 @@ async function runFfmpegCompress(inputPath: string, config: Config, ffmpegExe: s
     outputPath,
   ]
 
-  debug(config, `调用 ffmpeg 压缩: ${ffmpegExe} ${args.join(' ')}（CRF=${crf}）`, 'compress', 'info')
+  debug(config, `调用 ffmpeg 压缩: ${ffmpegExe} ${fullArgs.join(' ')}（CRF=${crf}）`, 'compress', 'info')
 
-  try {
-    await execFileAsync(ffmpegExe, args, {
-      timeout: COMPRESS_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true,
-    })
-  } catch (err: any) {
-    debug(config, `ffmpeg 压缩失败: ${err?.message || err}`, 'compress', 'error')
+  let ok = await runFfmpeg(ffmpegExe, fullArgs, config)
+  if (ok && fs.existsSync(outputPath) && fileSize(outputPath) > 0) {
+    return outputPath
+  }
+  // 清理半成品
+  try { fs.rmSync(outputPath, { force: true }) } catch { /* ignore */ }
+
+  // 第二次：降级为丢弃音频只压视频（应对异常音频编码/无声流）
+  debug(config, `ffmpeg 完整压缩失败，降级为丢弃音频重试（-an，仅视频）`, 'compress', 'info')
+  const fallbackArgs = [
+    '-y',
+    '-i', inputPath,
+    '-an',                      // 丢弃音频流
+    '-c:v', 'libx264',
+    '-crf', String(crf),
+    '-preset', 'veryfast',
+    '-movflags', '+faststart',
+    outputPath,
+  ]
+  ok = await runFfmpeg(ffmpegExe, fallbackArgs, config)
+  if (!ok) {
+    debug(config, `ffmpeg 降级压缩也失败`, 'compress', 'error')
     try { fs.rmSync(outputPath, { force: true }) } catch { /* ignore */ }
     return null
   }
@@ -110,8 +127,26 @@ async function runFfmpegCompress(inputPath: string, config: Config, ffmpegExe: s
     try { fs.rmSync(outputPath, { force: true }) } catch { /* ignore */ }
     return null
   }
-
+  debug(config, `ffmpeg 降级压缩成功（无声）: ${outputPath}`, 'compress', 'info')
   return outputPath
+}
+
+/**
+ * 调用 ffmpeg 一次。
+ *
+ * 用 runWithForcedKill 保证超时强杀进程，避免 ffmpeg 残留。
+ * 超时设 COMPRESS_TIMEOUT_MS。
+ *
+ * @returns 正常退出返回 true；超时/非 0 退出返回 false（不抛错）
+ */
+async function runFfmpeg(ffmpegExe: string, args: string[], config: Config): Promise<boolean> {
+  try {
+    await runWithForcedKill(ffmpegExe, args, { timeoutMs: COMPRESS_TIMEOUT_MS })
+    return true
+  } catch (err: any) {
+    debug(config, `ffmpeg 调用失败: ${err?.message || err}`, 'compress', 'error')
+    return false
+  }
 }
 
 /**

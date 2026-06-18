@@ -718,6 +718,16 @@ debug: "details"  # 显示所有调试信息
 
 ## 📜 更新日志
 
+### 5.2.47 (2026-06-18)
+
+#### 代码审查修复（健壮性 + 性能）
+
+- 🔴 **修复 tdl 超时残留进程占锁** - tdl 用 bolt 存储，SIGTERM 后有时不释放文件锁导致后续调用永久失败。改用 `spawn` + `detached`，超时强杀整个进程组（POSIX 负 PID / Windows taskkill /T）；锁冲突日志高亮提示 `pkill -9 tdl`
+- 🔴 **修复 file:// 同步阻塞** - `getVideoUrl` 读本地视频改用 `fs.promises.readFile` 异步读，避免几十 MB 视频 `readFileSync` 阻塞事件循环
+- 🔴 **压缩音频容错** - ffmpeg 完整压缩（视频+音频）失败时，自动降级为丢弃音频只压视频（`-an`），应对 Telegram 无声流/异常音频编码；ffmpeg 也改用 `runWithForcedKill` 保证超时不残留
+- 🟡 **减少缓存堆积** - tdl 源视频读入内存后立即删本地文件（base64/File/assets 都基于内存数据），避免大视频在缓存目录长期堆积
+- 🟢 注释澄清：data: 分支当前未被 tdl 流程使用（预留）；proxyByEnv 字段名沿用历史，实际走 --proxy flag
+
 ### 5.2.46 (2026-06-18)
 
 #### 修复源标签与标题重叠
