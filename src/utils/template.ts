@@ -74,16 +74,15 @@ export const getDefaultTemplate = (config: Config, bodyWidth: number | undefined
             <!-- 左侧装饰条 -->
             <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-primary"></div>
 
-            <!-- 右上角标签 (可选) -->
-            <div class="absolute top-4 right-4 flex gap-2">
-                <span class="px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-slate-100 text-slate-500 border border-slate-200 rounded">
-                    {{rss.channel.title}}
-                </span>
-            </div>
-
             <div class="p-8">
                 <!-- 头部信息 -->
                 <div class="mb-6">
+                    <!-- 源标签（置于文档流，右对齐，避免与标题重叠） -->
+                    <div class="flex justify-end mb-3">
+                        <span class="inline-block max-w-full truncate px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-slate-100 text-slate-500 border border-slate-200 rounded">
+                            {{rss.channel.title}}
+                        </span>
+                    </div>
                     <div class="flex items-start gap-3 mb-2">
                         <div class="mt-1 w-8 h-8 rounded-lg bg-primary/10 flex flex-shrink-0 items-center justify-center overflow-hidden">
                             <!-- RSS Feed Icon -->

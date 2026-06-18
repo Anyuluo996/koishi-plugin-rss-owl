@@ -200,7 +200,7 @@ export const Config: Schema<ConfigType> = Schema.object({
     enabled: Schema.boolean().description('启用错误追踪').default(false),
     dsn: Schema.string().role('secret').description('Sentry DSN').default(''),
     environment: Schema.string().description('错误追踪环境').default('production'),
-    release: Schema.string().description('错误追踪版本号').default('5.2.45'),
+    release: Schema.string().description('错误追踪版本号').default('5.2.46'),
     tracesSampleRate: Schema.number().min(0).max(1).description('性能追踪采样率').default(0.1),
     profilesSampleRate: Schema.number().min(0).max(1).description('性能分析采样率').default(0.1),
   }).description('错误追踪设置'),
