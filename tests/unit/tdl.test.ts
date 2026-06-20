@@ -12,6 +12,7 @@ import {
   parseTelegramLink,
   detectVideoTooBig,
   extractTooBigPoster,
+  extractTooBigPosters,
   detectBinary,
   resolveTdlBinary,
   _resetBinaryCacheForTest,
@@ -102,6 +103,46 @@ describe('extractTooBigPoster', () => {
   it('占位但无 img 时返回空串', () => {
     const html = cheerio.load('<blockquote>Video is too big</blockquote>')
     expect(extractTooBigPoster(html)).toBe('')
+  })
+})
+
+describe('extractTooBigPosters', () => {
+  it('多视频 album：返回全部 poster，顺序与 blockquote 一致', () => {
+    const html = cheerio.load(
+      '<blockquote><b>Video is too big</b><br><img src="https://x/p1.jpg"></blockquote>' +
+      '<blockquote><b>Video is too big</b><br><img src="https://x/p2.jpg"></blockquote>' +
+      '<blockquote><b>Video is too big</b><br><img src="https://x/p3.jpg"></blockquote>',
+    )
+    expect(extractTooBigPosters(html)).toEqual([
+      'https://x/p1.jpg',
+      'https://x/p2.jpg',
+      'https://x/p3.jpg',
+    ])
+  })
+
+  it('无图 poster 位置返回空串占位（长度仍对齐 blockquote 数）', () => {
+    const html = cheerio.load(
+      '<blockquote><b>Video is too big</b><br><img src="https://x/p1.jpg"></blockquote>' +
+      '<blockquote><b>Video is too big</b></blockquote>',
+    )
+    expect(extractTooBigPosters(html)).toEqual(['https://x/p1.jpg', ''])
+  })
+
+  it('无占位时返回空数组', () => {
+    const html = cheerio.load('<blockquote>正常引用</blockquote>')
+    expect(extractTooBigPosters(html)).toEqual([])
+  })
+
+  it('单视频与 extractTooBigPoster 结果一致', () => {
+    const html = cheerio.load(
+      '<blockquote><b>Video is too big</b><br><img src="https://x/p1.jpg"></blockquote>',
+    )
+    expect(extractTooBigPoster(html)).toBe(extractTooBigPosters(html)[0])
+  })
+
+  it('空输入返回空数组', () => {
+    expect(extractTooBigPosters(null)).toEqual([])
+    expect(extractTooBigPosters(undefined)).toEqual([])
   })
 })
 

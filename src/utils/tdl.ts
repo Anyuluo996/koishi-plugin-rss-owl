@@ -226,26 +226,41 @@ export function detectVideoTooBig(html: any): boolean {
 /**
  * 从 cheerio 文档里提取 "Video is too big" 占位 blockquote 内的海报图地址。
  *
+ * 多视频 album 时，返回**第一个**匹配 blockquote 的 poster（向后兼容）。
+ * 如需全部，用 extractTooBigPosters。
+ *
  * @param html cheerio 实例
  * @returns 找到则返回图片 URL，否则空串
  */
 export function extractTooBigPoster(html: any): string {
-  if (!html) return ''
+  return extractTooBigPosters(html)[0] || ''
+}
+
+/**
+ * 提取所有 "Video is too big" 占位 blockquote 的海报图地址，按文档出现顺序返回。
+ *
+ * 多视频 album 场景：3 个 blockquote 各带一张 poster，
+ * 返回顺序与 blockquote 顺序一致，用于按位置配对注入视频。
+ *
+ * @param html cheerio 实例
+ * @returns poster URL 数组（无图位置返回空串占位，长度 = too-big blockquote 数）
+ */
+export function extractTooBigPosters(html: any): string[] {
+  if (!html) return []
+  const posters: string[] = []
   try {
-    let poster = ''
     html('blockquote').each((_: any, el: any) => {
-      if (poster) return
       const $el = html(el)
       const text = $el.text() || ''
       if (VIDEO_TOO_BIG_PATTERN.test(text)) {
         const img = $el.find('img').first().attr('src') || ''
-        if (img) poster = img
+        posters.push(img)
       }
     })
-    return poster
   } catch {
-    return ''
+    return []
   }
+  return posters
 }
 
 export interface DownloadWithTdlOptions {
@@ -261,18 +276,19 @@ export interface DownloadWithTdlOptions {
 }
 
 /**
- * 调用 tdl 下载单条 Telegram 消息的视频。
+ * 调用 tdl 下载 Telegram 消息的视频（支持多视频 album）。
  *
- * 命令形态：`tdl [--storage ...] [--proxy ...] dl -u <link> -d <tmpDir>`
- * （全局 flag 必须在子命令 dl 之前；下载产物落在 -d 指定目录）
+ * 命令形态：`tdl [--storage ...] [--proxy ...] dl -u <link> -d <tmpDir> --group`
+ * （全局 flag 必须在子命令 dl 之前；--group 自动检测相册/分组消息，下载全部媒体；
+ *  对单视频无副作用——自动检测到 1 项）
  *
  * 代理与会话解析优先级：
  * - `--proxy`：config.tdl.proxy（专用）→ 订阅级代理（proxyByEnv != false）
  * - `--storage`：config.tdl.storage（登录与下载必须一致，否则找不到会话）
  *
- * @returns 成功返回 mp4 绝对路径；二进制缺失/未登录/超时/无产物时返回 null
+ * @returns 成功返回视频绝对路径数组（按文件名排序 = 专辑顺序）；二进制缺失/未登录/超时/无产物时返回 null
  */
-export async function downloadWithTdl(opts: DownloadWithTdlOptions): Promise<string | null> {
+export async function downloadWithTdl(opts: DownloadWithTdlOptions): Promise<string[] | null> {
   const { config, link, proxyAgent } = opts
   const timeoutSeconds = opts.timeoutSeconds ?? config.tdl?.timeout ?? 180
 
@@ -311,7 +327,7 @@ export async function downloadWithTdl(opts: DownloadWithTdlOptions): Promise<str
     debug(config, `tdl 使用代理: ${maskProxyUrl(proxyUrl)}`, 'tdl', 'details')
   }
 
-  args.push('dl', '-u', link, '-d', workDir)
+  args.push('dl', '-u', link, '-d', workDir, '--group')
 
   const label = tdlBin === 'tdl' ? 'tdl' : tdlBin
   debug(config, `调用 tdl 下载: ${label} ${args.join(' ')}（超时 ${timeoutSeconds}s）`, 'tdl', 'info')
@@ -332,43 +348,47 @@ export async function downloadWithTdl(opts: DownloadWithTdlOptions): Promise<str
     return null
   }
 
-  // 5. 扫描产物，挑体积最大的视频文件
-  const videoPath = pickLargestVideo(workDir)
-  if (!videoPath) {
+  // 5. 扫描产物，收集全部视频文件（按文件名排序，对齐专辑顺序）
+  const videoPaths = pickVideoFiles(workDir)
+  if (videoPaths.length === 0) {
     debug(config, `tdl 下载完成但目录内未发现视频文件: ${workDir}`, 'tdl', 'info')
     await safeRemoveDir(workDir)
     return null
   }
 
-  debug(config, `tdl 下载成功: ${videoPath}`, 'tdl', 'info')
-  return videoPath
+  debug(config, `tdl 下载成功（${videoPaths.length} 个视频）: ${videoPaths.join(', ')}`, 'tdl', 'info')
+  return videoPaths
 }
 
-/** 在目录中挑选体积最大的视频文件。
- *  Telegram 频道视频几乎都是 mp4；tdl 也会下载同消息的配图(.jpg)和描述(.json)，
- *  白名单只认视频扩展名。若想更严格可只认 .mp4（Telegram 视频 99% 是 mp4）。 */
-function pickLargestVideo(dir: string): string | null {
-  // Telegram 视频 = mp4；保留 mov/webm/mkv/m4v 兼容极少数转码产物
+/** 在目录中挑选全部视频文件，按文件名升序排列。
+ *
+ *  tdl --group 下文件名形如 `{dialogID}_{msgID}_{name}.mp4`，msgID 递增 = 专辑顺序，
+ *  按文件名排序即可对齐 RSS 描述里 blockquote 的出现顺序。
+ *  过滤掉 tdl 同时下载的配图(.jpg)、描述(.json)；跳过 0 字节半成品。 */
+function pickVideoFiles(dir: string): string[] {
   const videoExts = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v'])
-  let best: { path: string; size: number } | null = null
+  const found: { path: string; name: string }[] = []
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isFile()) continue
       const ext = path.extname(entry.name).toLowerCase()
       if (!videoExts.has(ext)) continue
-      const full = path.join(dir, entry.name)
+      // 校验非空文件（跳过 0 字节半成品）
       try {
-        const stat = fs.statSync(full)
-        if (!best || stat.size > best.size) best = { path: full, size: stat.size }
+        const stat = fs.statSync(path.join(dir, entry.name))
+        if (stat.size === 0) continue
       } catch {
-        // 单文件 stat 失败忽略
+        continue
       }
+      found.push({ path: path.join(dir, entry.name), name: entry.name })
     }
   } catch {
-    return null
+    return []
   }
-  return best?.path ?? null
+  // 按文件名升序，保证多视频与 blockquote 顺序一致
+  found.sort((a, b) => a.name.localeCompare(b.name, 'en'))
+  return found.map(f => f.path)
 }
 
 /** 静默删除目录，失败不抛错 */

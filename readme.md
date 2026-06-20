@@ -718,6 +718,15 @@ debug: "details"  # 显示所有调试信息
 
 ## 📜 更新日志
 
+### 5.2.48 (2026-06-20)
+
+#### 修复多视频 album 重复发送
+
+- 🐛 **多视频只下载第一个** - tdl 调用恒加 `--group`，自动检测相册/分组消息下载全部视频（单视频无副作用）
+- 🐛 **同一视频发 N 次** - `restoreTelegramVideos` 改为按位置配对：第 i 个 "Video is too big" blockquote ← 第 i 个下载视频，各自保留独立 poster
+- 🔄 **数量不匹配容错** - blockquote 多于视频：多出保留占位图；视频多于 blockquote：多出追加到文末
+- 🧩 `pickLargestVideo` → `pickVideoFiles`：收集全部视频按文件名排序（msgID 递增 = 专辑顺序）；新增 `extractTooBigPosters` 取所有 poster
+
 ### 5.2.47 (2026-06-18)
 
 #### 代码审查修复（健壮性 + 性能）
