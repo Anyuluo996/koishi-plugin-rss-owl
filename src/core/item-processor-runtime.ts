@@ -171,6 +171,11 @@ export async function renderTemplatedDescription(
 
 /**
  * 提取 HTML 中的视频资源，并按配置补齐 poster 图。
+ *
+ * 视频的发送方式由 config.basic.videoMode 决定（assets/File/base64/href/filter）。
+ * 仅在 videoMode === 'base64' 时强制内联 base64；其它模式交给 getVideoUrl 内部
+ * 按 videoMode 走 file:// / assets / href / filter 分支。
+ * （历史代码曾对所有视频硬编码 useBase64Mode=true，导致 videoMode 配置失效。）
  */
 export async function processVideos(
   deps: ItemProcessorRuntimeDeps,
@@ -178,9 +183,11 @@ export async function processVideos(
   arg: rssArg,
   videoList: Array<[string, string]>,
 ): Promise<void> {
+  const videoMode = deps.config.basic?.videoMode
+  const useVideoBase64 = videoMode === 'base64'
   await Promise.all(html('video').map(async (_: any, element: any) => {
     videoList.push([
-      await getVideoUrl(deps.ctx, deps.config, deps.$http, element.attribs.src, arg, true, element),
+      await getVideoUrl(deps.ctx, deps.config, deps.$http, element.attribs.src, arg, useVideoBase64, element),
       (element.attribs.poster && deps.config.basic?.usePoster)
         ? await getImageUrl(deps.ctx, deps.config, deps.$http, element.attribs.poster, arg, true)
         : '',
