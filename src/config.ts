@@ -213,6 +213,7 @@ export const Config: Schema<ConfigType> = Schema.object({
     compressThreshold: Schema.number().min(1).description('触发 ffmpeg 压缩的体积阈值（MB），默认沿用基础设置中的视频最大体积').default(30),
     crf: Schema.number().min(18).max(32).description('ffmpeg 压缩质量 CRF（18 接近无损体积大，32 体积小质量差）。ffmpeg 路径来自 Koishi 的 ffmpeg 服务（koishi-plugin-ffmpeg），未安装该服务则大视频会被跳过').default(30),
     proxyByEnv: Schema.boolean().description('是否把订阅级代理通过 --proxy 透传给 tdl 子进程（当上方 proxy 为空时生效）').default(true),
+    maxDownloadSize: Schema.number().min(0).description('下载前预查的最大体积阈值（MB）。插件先用 tdl chat export 读取 Media.Size，单条视频超过此值则跳过整条不下载（省带宽，避免下载注定被丢弃的巨大视频）。设为 0 表示不限制。').default(200),
   }).description('Telegram 大视频（tdl）设置'),
 })
 

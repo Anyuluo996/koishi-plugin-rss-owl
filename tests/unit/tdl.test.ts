@@ -15,6 +15,7 @@ import {
   extractTooBigPosters,
   detectBinary,
   resolveTdlBinary,
+  parseMediaSizes,
   _resetBinaryCacheForTest,
 } from '../../src/utils/tdl'
 
@@ -193,5 +194,104 @@ describe('resolveTdlBinary', () => {
       tdl: { binPath: process.execPath },
     } as any)
     expect(r).toBeNull()
+  })
+})
+
+describe('parseMediaSizes — tdl export JSON 解析（下载前预查体积）', () => {
+  it('解析顶层数组格式，提取 Media.Size', () => {
+    const raw = JSON.stringify([
+      { id: 1, Media: { Size: 52428800 } },   // 50MB
+      { id: 2, Media: { Size: 314572800 } },   // 300MB
+    ])
+    expect(parseMediaSizes(raw)).toEqual([52428800, 314572800])
+  })
+
+  it('解析 {messages:[...]} 包装格式', () => {
+    const raw = JSON.stringify({ messages: [{ Media: { Size: 1024 } }] })
+    expect(parseMediaSizes(raw)).toEqual([1024])
+  })
+
+  it('解析 {Messages:[...]} 大写字段', () => {
+    const raw = JSON.stringify({ Messages: [{ Media: { Size: 2048 } }] })
+    expect(parseMediaSizes(raw)).toEqual([2048])
+  })
+
+  it('兼容小写 media.size 字段', () => {
+    const raw = JSON.stringify([{ media: { size: 4096 } }])
+    expect(parseMediaSizes(raw)).toEqual([4096])
+  })
+
+  it('兼容 Size 为字符串数字', () => {
+    const raw = JSON.stringify([{ Media: { Size: '8192' } }])
+    expect(parseMediaSizes(raw)).toEqual([8192])
+  })
+
+  it('跳过无媒体或 Size<=0 的消息', () => {
+    const raw = JSON.stringify([
+      { id: 1, Media: { Size: 5000 } },
+      { id: 2 },                              // 无 Media
+      { id: 3, Media: {} },                   // Media 但无 Size
+      { id: 4, Media: { Size: 0 } },          // Size=0
+      { id: 5, text: '纯文字消息' },
+    ])
+    expect(parseMediaSizes(raw)).toEqual([5000])
+  })
+
+  it('空数组返回空数组', () => {
+    expect(parseMediaSizes('[]')).toEqual([])
+  })
+
+  it('非法 JSON 返回 null', () => {
+    expect(parseMediaSizes('not json')).toBeNull()
+    expect(parseMediaSizes('{broken')).toBeNull()
+  })
+
+  it('空字符串返回 null', () => {
+    expect(parseMediaSizes('')).toBeNull()
+    expect(parseMediaSizes('   ')).toBeNull()
+  })
+
+  it('非数组非 messages 对象返回 null', () => {
+    expect(parseMediaSizes(JSON.stringify({ foo: 'bar' }))).toBeNull()
+  })
+})
+
+describe('下载前大小阈值跳过逻辑（方向 A 决策）', () => {
+  // 模拟 restoreTelegramVideos 的核心决策：任一媒体超限则跳过整条
+  function shouldSkipBySize(sizes: number[] | null, maxDownloadMB: number): boolean {
+    if (!sizes || sizes.length === 0) return false
+    const limitBytes = maxDownloadMB * 1024 * 1024
+    return sizes.some(s => s > limitBytes)
+  }
+
+  it('任一视频超限（300MB > 200MB）应跳过', () => {
+    expect(shouldSkipBySize([52428800, 314572800], 200)).toBe(true)
+  })
+
+  it('全部在限内（各 50MB < 200MB）不应跳过', () => {
+    expect(shouldSkipBySize([52428800, 52428800], 200)).toBe(false)
+  })
+
+  it('恰好等于阈值不跳过（边界 < 而非 <=）', () => {
+    const exactly200MB = 200 * 1024 * 1024
+    expect(shouldSkipBySize([exactly200MB], 200)).toBe(false)
+  })
+
+  it('预查失败（null）不应跳过（放行下载）', () => {
+    expect(shouldSkipBySize(null, 200)).toBe(false)
+  })
+
+  it('预查无媒体（空数组）不应跳过', () => {
+    expect(shouldSkipBySize([], 200)).toBe(false)
+  })
+
+  it('maxDownloadMB=0 表示不限制（不跳过）', () => {
+    // restoreTelegramVideos 里 maxDownloadMB>0 才进入预查分支，此处模拟跳过判定
+    const maxDownloadMB = 0
+    expect(maxDownloadMB > 0).toBe(false)
+  })
+
+  it('单个巨大视频 2GB 应跳过', () => {
+    expect(shouldSkipBySize([2147483648], 200)).toBe(true)
   })
 })

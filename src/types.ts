@@ -285,6 +285,8 @@ export interface TdlConfig {
   proxy?: string               // tdl/ffmpeg 子进程专用代理，形如 http://host:port；为空则用订阅级代理或全局代理
   storage?: string             // tdl 会话存储路径，如 /koishi/.tdl/data；登录与下载需一致，否则找不到会话
   binPath?: string             // tdl 二进制路径，默认从 PATH 探测；容器持久卷场景可指定如 /koishi/bin/tdl
+  maxDownloadSize?: number     // 下载前预查的最大体积（MB）。超过则跳过整条不下载，省带宽。
+                               // 通过 tdl chat export 读 Media.Size 实现。默认 200。
 }
 
 /**

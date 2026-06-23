@@ -23,10 +23,12 @@ import { Config, rssArg } from '../types'
 import { debug } from '../utils/logger'
 import { getCacheDir } from '../utils/media'
 import {
+  DEFAULT_MAX_DOWNLOAD_SIZE_MB,
   detectVideoTooBig,
   downloadWithTdl,
   extractTooBigPosters,
   parseTelegramLink,
+  probeMessageSizes,
   safeRemoveDir,
 } from '../utils/tdl'
 import { compressVideoIfNeeded } from '../utils/video-compress'
@@ -73,6 +75,27 @@ export async function restoreTelegramVideos(
     'tg-restore',
     'info',
   )
+
+  // 下载前预查媒体体积（方向 A）：maxDownloadSize>0 时，任一视频超限则跳过整条不下载，
+  // 省去下载注定被丢弃的巨大视频的带宽与时间。预查失败（null）则放行，不阻塞下载。
+  const maxDownloadMB = config.tdl?.maxDownloadSize ?? DEFAULT_MAX_DOWNLOAD_SIZE_MB
+  if (maxDownloadMB > 0) {
+    const sizes = await probeMessageSizes({ config, link, proxyAgent: arg?.proxyAgent })
+    if (sizes && sizes.length > 0) {
+      const limitBytes = maxDownloadMB * 1024 * 1024
+      const oversize = sizes.filter(s => s > limitBytes)
+      if (oversize.length > 0) {
+        const detail = sizes.map(s => (s / 1024 / 1024).toFixed(1) + 'MB').join(', ')
+        debug(
+          config,
+          `tdl 预查媒体体积超限（${detail}，限制 ${maxDownloadMB}MB），跳过整条不下载: ${link}`,
+          'tg-restore',
+          'info',
+        )
+        return false
+      }
+    }
+  }
 
   const downloaded = await downloadWithTdl({
     config,

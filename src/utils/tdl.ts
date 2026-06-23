@@ -165,6 +165,149 @@ export interface TelegramLinkInfo {
   messageId: number
 }
 
+/** maxDownloadSize 配置缺省值（MB） */
+export const DEFAULT_MAX_DOWNLOAD_SIZE_MB = 200
+
+/** probeMessageSize 探测超时（秒）：export 只取元数据，不下载，很快 */
+const PROBE_TIMEOUT_SECONDS = 30
+
+/**
+ * 通过 `tdl chat export -T id -i <msgId>` 在下载前预查消息媒体体积。
+ *
+ * 读取导出 JSON 里每条消息的 Media.Size（字节）。多视频 album 时，
+ * `--group` 的导出会包含同组全部消息，返回所有视频大小数组（按 JSON 出现顺序）。
+ *
+ * 这是「方向 A」预查：下载前就知道体积，超限则跳过整条，省去无谓的大文件下载。
+ *
+ * 命令形态（global flags 在子命令前）：
+ *   tdl [--storage ...] [--proxy ...] chat export -c <channel> -T id -i <msgId> -o <tmpfile> --all
+ *
+ * -c 接受：公开频道用 username（如 anyul996）；私有频道用数字 ID（c/1234567890 → 1234567890）。
+ * -T id + -i <id> 只导出指定消息，不扫整段历史，开销小。
+ *
+ * @returns 成功返回媒体体积数组（字节，按 JSON 顺序）；探测不可用/失败返回 null（调用方应放行下载，不阻塞）
+ */
+export async function probeMessageSizes(
+  opts: DownloadWithTdlOptions,
+): Promise<number[] | null> {
+  const { config, link, proxyAgent } = opts
+  const linkInfo = parseTelegramLink(link)
+  if (!linkInfo) return null
+
+  const tdlBin = await resolveTdlBinary(config)
+  if (!tdlBin) return null
+
+  // 解析 chat 参数：私有频道 c/<id> 取数字部分；公开频道用 username
+  const channelArg = linkInfo.channel.startsWith('c/')
+    ? linkInfo.channel.slice(2)
+    : linkInfo.channel
+
+  // 临时输出文件
+  const tmpFile = path.join(os.tmpdir(), `rss-owl-tdl-probe-${crypto.randomBytes(6).toString('hex')}.json`)
+
+  // 构造参数（global flags 在 chat 子命令之前）
+  const args: string[] = []
+  if (config.tdl?.storage) {
+    args.push('--storage', `type=bolt,path=${config.tdl.storage}`)
+  }
+  const proxyUrl = resolveProxyUrl(config, proxyAgent)
+  if (proxyUrl) args.push('--proxy', proxyUrl)
+
+  args.push('chat', 'export',
+    '-c', channelArg,
+    '-T', 'id',
+    '-i', String(linkInfo.messageId),
+    '-o', tmpFile,
+    '--all',  // 包含所有消息（含分组内的）
+  )
+
+  debug(config, `tdl 预查媒体体积: ${tdlBin === 'tdl' ? 'tdl' : tdlBin} ${args.join(' ')}`, 'tdl-probe', 'info')
+
+  try {
+    await runWithForcedKill(tdlBin, args, { timeoutMs: PROBE_TIMEOUT_SECONDS * 1000 })
+  } catch (err: any) {
+    const msg = err?.message || String(err)
+    if (/used by another process/i.test(msg)) {
+      debug(config, `tdl 预查报 bolt 锁冲突：${msg}`, 'tdl-probe', 'error')
+    } else {
+      debug(config, `tdl 预查失败（已忽略，放行下载）: ${msg}`, 'tdl-probe', 'info')
+    }
+    await safeRemoveFile(tmpFile)
+    return null
+  }
+
+  // 解析 JSON，提取 Media.Size
+  let raw: string
+  try {
+    raw = fs.readFileSync(tmpFile, 'utf-8')
+  } catch {
+    debug(config, `tdl 预查输出文件不存在: ${tmpFile}`, 'tdl-probe', 'info')
+    return null
+  } finally {
+    await safeRemoveFile(tmpFile)
+  }
+
+  const sizes = parseMediaSizes(raw)
+  if (sizes === null) {
+    debug(config, `tdl 预查 JSON 解析失败，放行下载: ${raw.substring(0, 200)}`, 'tdl-probe', 'info')
+    return null
+  }
+  debug(config, `tdl 预查完成，媒体体积: ${sizes.map(s => (s / 1024 / 1024).toFixed(2) + ' MB').join(', ') || '(无媒体)'}`, 'tdl-probe', 'info')
+  return sizes
+}
+
+/**
+ * 从 tdl chat export 的 JSON 输出中提取所有消息的 Media.Size（字节）。
+ *
+ * JSON 形态（tdl 0.18.x）：顶层数组，每条消息含 `Media` 对象，其 `Size` 为字节数；
+ * 非媒体消息无 Media 或 Size 为 0。
+ *
+ * 容错：任何结构异常返回 null（让调用方放行下载，不误杀）。
+ *
+ * @param raw tdl export JSON 文本
+ * @returns 媒体体积数组（按 JSON 顺序，仅含 Size>0 的）；解析失败返回 null
+ */
+export function parseMediaSizes(raw: string): number[] | null {
+  if (!raw || !raw.trim()) return null
+  let data: any
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    return null
+  }
+
+  // 支持顶层数组或 {messages:[...]} 两种包装
+  const messages: any[] = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.messages) ? data.messages
+    : Array.isArray(data?.Messages) ? data.Messages
+    : null
+
+  if (!messages) return null
+
+  const sizes: number[] = []
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') continue
+    const media = msg.Media || msg.media
+    if (!media) continue
+    // Size 可能是 number 或 string（数字），兼容
+    const size = media.Size ?? media.size
+    if (size == null) continue
+    const n = typeof size === 'number' ? size : parseInt(size, 10)
+    if (Number.isFinite(n) && n > 0) sizes.push(n)
+  }
+  return sizes
+}
+
+/** 静默删除单个文件 */
+async function safeRemoveFile(filePath: string): Promise<void> {
+  try {
+    await fs.promises.unlink(filePath)
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * 从 Telegram 链接中解析频道与消息 ID。
  *
