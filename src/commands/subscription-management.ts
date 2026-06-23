@@ -26,7 +26,7 @@ export function registerSubscriptionManagementCommands(deps: SubscriptionCommand
 function registerListCommand(deps: SubscriptionCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.list [id:number]', '查看订阅列表')
-    .alias('rsso.list')
+    .alias('rsso.list', 'rsls')
     .usage(`查看订阅列表
 
 用法:
@@ -53,10 +53,10 @@ function registerListCommand(deps: SubscriptionCommandDeps): void {
       const pushTarget = `${rssItem.platform}:${rssItem.guildId}`
       const isCrossGroup = rssItem.platform !== platform || rssItem.guildId !== guildId
       const targetInfo = isCrossGroup
-        ? `📤 推送目标: ${pushTarget} (跨群订阅)`
-        : `📤 推送目标: ${pushTarget} (本群)`
+        ? `推送目标: ${pushTarget} (跨群订阅)`
+        : `推送目标: ${pushTarget} (本群)`
 
-      return `📰 订阅详情 [序号:${id} | ID:${rssItem.id}]
+      return `订阅详情 [序号:${id} | ID:${rssItem.id}]
 标题: ${rssItem.title}
 链接: ${rssItem.url}
 类型: ${rssItem.arg?.type || 'RSS'}
@@ -70,7 +70,7 @@ ${targetInfo}
 function registerRemoveCommand(deps: SubscriptionCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.remove <id:number>', '删除订阅')
-    .alias('rsso.remove')
+    .alias('rsso.remove', 'rsrm')
     .usage(`删除订阅
 
 用法:
@@ -101,7 +101,7 @@ function registerRemoveCommand(deps: SubscriptionCommandDeps): void {
 function registerPullCommand(deps: SubscriptionCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.pull <id:number>', '拉取订阅最新内容')
-    .alias('rsso.pull')
+    .alias('rsso.pull', 'rspl')
     .usage(`拉取订阅最新内容
 
 用法:
@@ -153,7 +153,7 @@ function registerPullCommand(deps: SubscriptionCommandDeps): void {
 function registerFollowCommand(deps: SubscriptionCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.follow <id:number>', '关注订阅')
-    .alias('rsso.follow')
+    .alias('rsso.follow', 'rsfw')
     .usage(`关注订阅，在该订阅更新时提醒你
 
 用法:
@@ -172,13 +172,13 @@ function registerFollowCommand(deps: SubscriptionCommandDeps): void {
       if (options.all) {
         const authorityCheck = checkAuthority(authority, deps.config.basic.advancedAuthority, `权限不足！当前权限: ${authority}，需要权限: ${deps.config.basic.advancedAuthority} 或以上`)
         if (!authorityCheck.success) return authorityCheck.message
-        if (followers.includes('all')) return '已经设置全员提醒'
+        if (followers.includes('all')) return '💡 已经设置全员提醒'
         followers.push('all')
         await deps.ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { followers })
         return '✅ 已设置全员提醒'
       }
 
-      if (followers.includes(authorId)) return '已经关注过了'
+      if (followers.includes(authorId)) return '💡 已经关注过了'
       followers.push(authorId)
       await deps.ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { followers })
       return '✅ 关注成功'

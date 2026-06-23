@@ -1,11 +1,33 @@
 # koishi-plugin-rss-owl
 
 [![npm](https://img.shields.io/npm/v/@anyul/koishi-plugin-rss?style=flat-square)](https://www.npmjs.com/package/@anyul/koishi-plugin-rss)
-![version](https://img.shields.io/badge/version-5.2.3-brightgreen)
+![version](https://img.shields.io/badge/version-5.3.0-brightgreen)
 
 > 功能强大的 Koishi RSS 订阅插件，支持多种订阅源、图片渲染、AI 摘要等高级功能
 
-当前文档基于 `v5.2.3`，已同步命令模块化、入口装配层收敛与最新模板名称。
+当前文档基于 `v5.3.0`，已同步命令模块化、原生子命令树、短别名与统一输出风格。
+
+## 📖 命令文档
+
+完整命令参考见 **[docs/COMMANDS.md](docs/COMMANDS.md)**，包含所有命令的用法、选项、示例与短别名速查表。
+
+### 命令短别名
+
+为方便聊天输入，每个命令都注册了 `rs` + 2 字母短别名（与完整写法等价）：
+
+| 短别名 | 完整命令 | 短别名 | 完整命令 |
+|--------|---------|--------|---------|
+| `rsls` | `rsso.list` | `rshm` | `rsso.html` |
+| `rsed` | `rsso.edit` | `rsak` | `rsso.ask` |
+| `rsrm` | `rsso.remove` | `rswt` | `rsso.watch` |
+| `rspl` | `rsso.pull` | `rsc` | `rsso.cache` |
+| `rsfw` | `rsso.follow` | `rsq` | `rsso.queue` |
+
+```text
+rsls              # = rsso.list
+rsed 1 -t "新标题" # = rsso.edit 1 -t "新标题"
+rsc list          # = rsso.cache list
+```
 
 ## ✨ 功能特性
 

@@ -20,7 +20,7 @@ export interface SubscriptionEditCommandDeps {
 export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.edit <id:number>', '修改订阅配置')
-    .alias('rsso.edit')
+    .alias('rsso.edit', 'rsed')
     .usage(`修改订阅的配置项
 
 用法:
@@ -29,7 +29,7 @@ export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDep
   rsso.edit 1 -u https://...      - 修改URL
   rsso.edit 1 -s ".item"         - 修改选择器（HTML监控）
   rsso.edit 1 --target onebot:123  - 修改推送目标（高级权限）
-  rsso.edit 1 --target "onebot:123,telegram:456"  - 多个推送目标（高级权限）⭐
+  rsso.edit 1 --target "onebot:123,telegram:456"  - 多个推送目标（高级权限）
   rsso.edit 1 -t "新标题" --test  - 测试修改（不保存）
 
 示例:
@@ -70,7 +70,7 @@ export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDep
 
       const hasChanges = options.title || options.url || options.template || options.selector || options.target
       if (!hasChanges) {
-        return '请指定要修改的内容\n可用选项: -t (标题), -u (URL), -i (模板), -s (选择器), --target (推送目标)\n使用 --help 查看详细帮助'
+        return '❌ 请指定要修改的内容\n可用选项: -t (标题), -u (URL), -i (模板), -s (选择器), --target (推送目标)\n💡 使用 --help 查看详细帮助'
       }
 
       const parseResult = parseTargets(options.target)
@@ -87,7 +87,7 @@ export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDep
 }
 
 function buildEditPreview(rssItem: any, id: number, options: EditCommandOptions, parsedTargets: string[]): string {
-  let testOutput = `📝 修改预览 [序号:${id} | ID:${rssItem.id}]\n\n`
+  let testOutput = `修改预览 [序号:${id} | ID:${rssItem.id}]\n\n`
   testOutput += `当前标题: ${rssItem.title}\n`
   testOutput += `当前URL: ${rssItem.url}\n`
   testOutput += `当前推送目标: ${rssItem.platform}:${rssItem.guildId}\n`
@@ -145,7 +145,7 @@ async function saveSubscriptionChanges(ctx: Context, rssItem: any, id: number, o
       const originalTarget = `${rssItem.platform}:${rssItem.guildId}`
       let result = `✅ 订阅已更新 [序号:${id} | ID:${rssItem.id}]\n\n`
       result += `已创建 ${parsedTargets.length} 个推送目标:\n\n`
-      result += `1️⃣ 原订阅 (本群): ${originalTarget}\n`
+      result += `1. 原订阅 (本群): ${originalTarget}\n`
 
       await ctx.database.set(('rssOwl' as any), rssItem.id, updates)
 

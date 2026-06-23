@@ -48,7 +48,7 @@ export function registerWebMonitorCommands(deps: WebMonitorCommandDeps): void {
 function registerHtmlMonitorCommand(deps: WebMonitorCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.html <url:string>', '监控网页变化 (CSS Selector)')
-    .alias('rsso.html')
+    .alias('rsso.html', 'rshm')
     .usage(`
 HTML 网页监控功能，使用 CSS 选择器提取内容
 用法:
@@ -72,8 +72,8 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
     .option('test', '-T 测试抓取结果 (不创建订阅)')
     .example('rsso.html https://news.ycombinator.com -s ".titleline > a"')
     .action(async ({ session, options }, url) => {
-      if (!url) return '请输入 URL'
-      if (!options.selector) return '请指定 CSS 选择器 (-s)'
+      if (!url) return '❌ 请输入 URL'
+      if (!options.selector) return '❌ 请指定 CSS 选择器 (-s)'
 
       const logContext = buildCommandLogContext(session as any, 'rsso.html', options.test ? 'test' : 'create')
       const { guildId, platform } = extractSessionInfo(session as any)
@@ -85,15 +85,15 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
       try {
         if (options.test) {
           const items = await deps.getRssData(normalizedUrl, arg)
-          if (!items.length) return '未找到符合选择器的元素'
+          if (!items.length) return '❌ 未找到符合选择器的元素'
           return buildItemsPreview(items, `找到 ${items.length} 个元素:`, true)
         }
 
         const rssList = await deps.ctx.database.get(('rssOwl' as any), { platform, guildId })
-        if (rssList.find(item => item.url === normalizedUrl)) return '该订阅已存在'
+        if (rssList.find(item => item.url === normalizedUrl)) return '❌ 该订阅已存在'
 
         const htmlItems = await deps.getRssData(normalizedUrl, arg)
-        if (!htmlItems.length) return '未找到符合选择器的元素，无法创建订阅'
+        if (!htmlItems.length) return '❌ 未找到符合选择器的元素，无法创建订阅'
 
         const title = options.title || htmlItems[0]?.rss?.channel?.title || `HTML监控: ${normalizedUrl}`
         const rssItem: any = {
@@ -110,7 +110,7 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
         }
 
         if (deps.config.basic.urlDeduplication && rssList.find(item => item.rssId === rssItem.rssId)) {
-          return `订阅已存在: ${rssItem.rssId}`
+          return `❌ 订阅已存在: ${rssItem.rssId}`
         }
 
         await deps.ctx.database.create(('rssOwl' as any), rssItem)
@@ -119,10 +119,10 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
           await broadcastInitialItems(deps, `${platform}:${guildId}`, htmlItems, rssItem)
         }
 
-        return `订阅成功: ${title}\n提示: HTML监控基于内容变化检测，请确保选择器稳定`
+        return `✅ 订阅成功: ${title}\n💡 提示: HTML监控基于内容变化检测，请确保选择器稳定`
       } catch (error) {
         deps.debug(error, 'html error', 'error', logContext)
-        return `抓取失败: ${getFriendlyErrorMessage(error, 'HTML监控')}`
+        return `❌ 抓取失败: ${getFriendlyErrorMessage(error, 'HTML监控')}`
       }
     })
 }
@@ -130,7 +130,7 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
 function registerAskCommand(deps: WebMonitorCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.ask <url:string> <instruction:text>', 'AI 智能订阅网页')
-    .alias('rsso.ask')
+    .alias('rsso.ask', 'rsak')
     .usage(`AI 智能订阅功能，自动生成 CSS 选择器
 
 前置要求:
@@ -147,8 +147,8 @@ function registerAskCommand(deps: WebMonitorCommandDeps): void {
     .option('test', '-T 测试模式 (只分析不订阅)')
     .example('rsso.ask https://news.ycombinator.com "监控首页的前5条新闻标题"')
     .action(async ({ session, options }, url, instruction) => {
-      if (!url) return '请输入网址'
-      if (!instruction) return '请描述你的需求'
+      if (!url) return '❌ 请输入网址'
+      if (!instruction) return '❌ 请描述你的需求'
 
       const logContext = buildCommandLogContext(session as any, 'rsso.ask', options.test ? 'test' : 'analyze')
       const normalizedUrl = ensureUrlProtocol(url)
@@ -164,14 +164,14 @@ function registerAskCommand(deps: WebMonitorCommandDeps): void {
             template: 'content',
           })
 
-          if (!items.length) return `选择器未匹配到任何元素: ${selector}`
+          if (!items.length) return `❌ 选择器未匹配到任何元素: ${selector}`
           return `AI 生成的选择器: ${selector}\n\n匹配到 ${items.length} 个元素:\n${items.slice(0, 2).map((item: any) => normalizePreviewText(item?.title) || '无标题').join('\n')}`
         }
 
         return `AI 生成的选择器: ${selector}\n请使用 rsso.html ${normalizedUrl} -s "${selector}" 完成订阅`
       } catch (error) {
         deps.debug(error, 'ask error', 'error', logContext)
-        return `AI 分析失败: ${getFriendlyErrorMessage(error, 'AI生成选择器')}`
+        return `❌ AI 分析失败: ${getFriendlyErrorMessage(error, 'AI生成选择器')}`
       }
     })
 }
@@ -179,7 +179,7 @@ function registerAskCommand(deps: WebMonitorCommandDeps): void {
 function registerWatchCommand(deps: WebMonitorCommandDeps): void {
   deps.ctx.guild()
     .command('rssowl.watch <url:string> [keyword:text]', '简单网页监控')
-    .alias('rsso.watch')
+    .alias('rsso.watch', 'rswt')
     .usage(`
 简单网页监控，支持关键词或整页监控。
 用法:
@@ -192,7 +192,7 @@ function registerWatchCommand(deps: WebMonitorCommandDeps): void {
     .option('test', '-T 测试模式 (只预览不订阅)')
     .example('rsso.watch https://example.com "缺货"')
     .action(async ({ session, options }, url, keyword) => {
-      if (!url) return '请输入 URL'
+      if (!url) return '❌ 请输入 URL'
 
       const logContext = buildCommandLogContext(session as any, 'rsso.watch', options.test ? 'test' : 'preview')
       const normalizedUrl = ensureUrlProtocol(url)
@@ -201,19 +201,19 @@ function registerWatchCommand(deps: WebMonitorCommandDeps): void {
       try {
         if (options.test) {
           const items = await deps.getRssData(normalizedUrl, arg)
-          if (!items.length) return '未找到内容'
+          if (!items.length) return '❌ 未找到内容'
           return buildItemsPreview(items, `找到 ${items.length} 条内容:`, false)
         }
 
-        return '请使用 rsso 命令完成订阅，或使用 -T 测试'
+        return '💡 请使用 rsso 命令完成订阅，或使用 -T 测试'
       } catch (error) {
         deps.debug(error, 'watch error', 'error', logContext)
-        return `监控失败: ${getFriendlyErrorMessage(error, '网页监控')}`
+        return `❌ 监控失败: ${getFriendlyErrorMessage(error, '网页监控')}`
       }
     })
 }
 
-function buildHtmlMonitorArg(options: HtmlMonitorOptions): HtmlMonitorArg {
+export function buildHtmlMonitorArg(options: HtmlMonitorOptions): HtmlMonitorArg {
   return {
     type: 'html',
     selector: options.selector,
@@ -226,7 +226,7 @@ function buildHtmlMonitorArg(options: HtmlMonitorOptions): HtmlMonitorArg {
   }
 }
 
-function buildWatchArg(keyword: string | undefined, options: WatchCommandOptions): rssArg {
+export function buildWatchArg(keyword: string | undefined, options: WatchCommandOptions): rssArg {
   return {
     type: 'html',
     selector: keyword ? `*:contains("${keyword}")` : 'body',

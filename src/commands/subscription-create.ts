@@ -3,7 +3,42 @@ import { Context } from 'koishi'
 import type { Config, TemplateType } from '../types'
 import { ensureUrlProtocol } from '../utils/common'
 import { getFriendlyErrorMessage } from '../utils/error-handler'
-import { buildCommandLogContext, checkAuthority, extractSessionInfo, parseTarget } from './utils'
+import { buildCommandLogContext, checkAuthority, extractSessionInfo, parseTarget, isValidUrl } from './utils'
+
+export interface QuickListItem {
+  prefix: string
+  name: string
+  detail: string
+  example: string
+  replace: string
+}
+
+/**
+ * 按稳定键解析快速订阅项（审查 #12）。
+ * 优先按 prefix（稳定标识）匹配，避免数组重排导致「编号 1 指向不同项」的漂移；
+ * prefix 未命中时再回退到数字序号（向后兼容老用法）。
+ * 返回 null 表示既非合法 prefix 也非合法序号。
+ */
+export function resolveQuickItem(
+  input: string,
+  quickList: QuickListItem[],
+): { item: QuickListItem; matchedBy: 'prefix' | 'index' } | null {
+  if (!input) return null
+  const trimmed = String(input).trim()
+
+  // 1) prefix 精确匹配（稳定键）
+  const byPrefix = quickList.find(q => q.prefix === trimmed)
+  if (byPrefix) return { item: byPrefix, matchedBy: 'prefix' }
+
+  // 2) 数字序号回退（兼容历史用法，依赖数组顺序，不稳定）
+  const num = parseInt(trimmed, 10)
+  if (!Number.isNaN(num) && num >= 1 && num <= quickList.length) {
+    const item = quickList[num - 1]
+    return { item, matchedBy: 'index' }
+  }
+
+  return null
+}
 
 interface CreateCommandOptions {
   quick?: string
@@ -26,7 +61,7 @@ export interface SubscriptionCreateCommandDeps {
   ctx: Context
   config: Config
   usage: string
-  quickList: Array<{ name: string; detail: string; example: string }>
+  quickList: QuickListItem[]
   parseQuickUrl: (url: string) => string
   parsePubDate: (pubDate: any) => Date
   getRssData: (url: string, arg: any) => Promise<any[]>
@@ -44,16 +79,10 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
     .command('rssowl <url:text>', '订阅 RSS/源')
     .alias('rsso')
     .usage(deps.usage)
-    .option('list', '-l [content] 查看订阅列表(详情) [已移至 rsso.list 子命令，使用列表序号]')
-    .option('remove', '-r <序号> 删除订阅 [已移至 rsso.remove 子命令，使用列表序号]')
-    .option('removeAll', '删除全部订阅 [已移至 rsso.remove --all 子命令]')
-    .option('follow', '-f <序号> 关注订阅 [已移至 rsso.follow 子命令，使用列表序号]')
-    .option('followAll', '<序号> 在该订阅更新时提醒所有人 [已移至 rsso.follow --all 子命令，使用列表序号]')
     .option('target', '--target <platform:guildId> 跨群订阅（高级权限）')
     .option('arg', '-a <content> 自定义配置')
     .option('template', '-i <content> 消息模板')
     .option('title', '-t <content> 自定义命名')
-    .option('pull', '-p <序号> 拉取订阅最新更新 [已移至 rsso.pull 子命令，使用列表序号]')
     .option('force', '强行写入')
     .option('daily', '-d <content>')
     .option('test', '-T 测试')
@@ -69,29 +98,32 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
       deps.debug(`${platform}:${userId}:${guildId}, bot:${botSelfId}`, '', 'info', logContext)
 
       if (options?.quick === '') {
-        return '输入 rsso -q [id] 查询详情\n' + deps.quickList.map((v, i) => `${i + 1}.${v.name}`).join('\n')
+        // 同时显示序号与 prefix，引导用户使用稳定的 prefix 键
+        return '输入 rsso -q <prefix|序号> 查询详情\n' + deps.quickList.map((v, i) => `${i + 1}.${v.name} [${v.prefix}]`).join('\n')
       }
 
       if (options?.quick) {
-        const currentQuickObj = deps.quickList[parseInt(options.quick) - 1]
-        if (!currentQuickObj) return `快速订阅编号不存在: ${options.quick}`
-        return `${currentQuickObj.name}\n${currentQuickObj.detail}\n例:rsso -T ${currentQuickObj.example}\n(${deps.parseQuickUrl(currentQuickObj.example)})`
+        const resolved = resolveQuickItem(options.quick, deps.quickList as QuickListItem[])
+        if (!resolved) return `快速订阅不存在: ${options.quick}\n💡 使用 rsso -q 查看可用列表（支持 prefix 或序号）`
+        const { item: currentQuickObj, matchedBy } = resolved
+        const hint = matchedBy === 'index' ? '\n💡 提示：序号会随列表调整变化，推荐使用 prefix [' + currentQuickObj.prefix + '] 作为稳定键' : ''
+        return `${currentQuickObj.name}\n${currentQuickObj.detail}\n例:rsso -T ${currentQuickObj.example}\n(${deps.parseQuickUrl(currentQuickObj.example)})${hint}`
       }
 
       if (platform.includes('sandbox') && !options.test && url) {
         session.send('沙盒中无法推送更新，但RSS依然会被订阅，建议使用 -T 选项进行测试')
       }
 
+      if (!url) return deps.usage
+
+      // 校验 URL 格式，给用户即时反馈，避免带着非法 URL 走到网络请求
+      if (!isValidUrl(ensureUrlProtocol(url))) {
+        return '❌ URL 格式不正确，请以 http:// 或 https:// 开头'
+      }
+
       const rssList = await deps.ctx.database.get(('rssOwl' as any), { platform, guildId })
 
-      if (options?.list === '' || options?.list) return '💡 提示：请使用子命令查看订阅\n\nrsso.list              - 查看所有订阅（显示序号）\nrsso.list 1            - 查看订阅详情\n\n（旧选项 -l 仍可使用，但建议迁移到新命令）'
-      if (options?.remove) return '💡 提示：请使用子命令删除订阅\n\nrsso.remove 1           - 删除订阅 #1（使用列表序号）\nrsso.remove --all       - 删除全部订阅\n\n（旧选项 -r 仍可使用，但建议迁移到新命令）'
-      if (options?.removeAll) return '💡 提示：请使用子命令删除订阅\n\nrsso.remove --all       - 删除全部订阅\n\n（旧选项仍可使用，但建议迁移到新命令）'
-      if (options?.follow) return '💡 提示：请使用子命令关注订阅\n\nrsso.follow 1           - 关注订阅 #1（使用列表序号）\n\n（旧选项 -f 仍可使用，但建议迁移到新命令）'
-      if (options?.followAll) return '💡 提示：请使用子命令设置全员提醒\n\nrsso.follow 1 --all     - 设置全员提醒（使用列表序号）\n\n（旧选项仍可使用，但建议迁移到新命令）'
-      if (options?.pull) return '💡 提示：请使用子命令拉取订阅\n\nrsso.pull 1             - 拉取订阅 #1 的最新更新（使用列表序号）\n\n（旧选项 -p 仍可使用，但建议迁移到新命令）'
-      if (!url) return deps.usage
-      if (rssList.find(item => item.url === url)) return '该订阅已存在'
+      if (rssList.find(item => item.url === url)) return '❌ 该订阅已存在'
 
       const rawArg = deps.formatArg(options as Record<string, any>)
       const arg = deps.mixinArg(rawArg)
@@ -112,7 +144,7 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
 
         if (options.test) {
           try {
-            await deps.ctx.broadcast([`${targetPlatform}:${targetGuildId}`], '📤 跨群订阅测试消息')
+            await deps.ctx.broadcast([`${targetPlatform}:${targetGuildId}`], '跨群订阅测试消息')
             return `✅ 测试消息已发送到目标群组\n目标: ${targetPlatform}:${targetGuildId}\n\n说明：Bot 可以访问该群组，跨群订阅可以正常工作。\n去掉 --test 选项完成订阅。`
           } catch (error: any) {
             return `❌ 无法发送到目标群组\n目标: ${targetPlatform}:${targetGuildId}\n错误: ${error.message}\n\n请确认：\n1. Bot 是否在该群组中\n2. 群组ID 是否正确\n3. 平台名称是否正确（如 onebot, telegram 等）`
@@ -158,7 +190,7 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
           const forceCheck = checkAuthority(authority, deps.config.basic.authority, `权限不足！当前权限: ${authority}，需要权限: ${deps.config.basic.authority} 或以上`)
           if (!forceCheck.success) return forceCheck.message
         } else if (deps.config.basic.urlDeduplication && rssList.find(item => item.rssId === rssItem.rssId)) {
-          return `订阅已存在: ${rssItem.rssId}`
+          return `❌ 订阅已存在: ${rssItem.rssId}`
         }
 
         await deps.ctx.database.create(('rssOwl' as any), rssItem)
@@ -172,7 +204,7 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
           await deps.ctx.broadcast([`${targetPlatform}:${targetGuildId}`], messageList.join(''))
         }
 
-        return `订阅成功: ${title}`
+        return `✅ 订阅成功: ${title}`
       } catch (error) {
         deps.debug(error, 'add error', 'error', logContext)
         return `订阅失败: ${getFriendlyErrorMessage(error, '添加订阅')}`

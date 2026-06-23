@@ -18,8 +18,8 @@ export const usage = `
   rsso.pull &lt;id&gt;                         - 拉取订阅最新内容
   rsso.follow &lt;id&gt; [--all]               - 关注订阅更新 / 全员提醒
   rsso.edit &lt;id&gt; [选项]                  - 修改标题、URL、模板、选择器、目标
-  rsso.cache                             - 消息缓存管理
-  rsso.queue                             - 发送队列管理
+  rsso.cache                             - 消息缓存管理（list/search/stats/pull/clear/cleanup）
+  rsso.queue                             - 发送队列管理（stats/retry/cleanup）
 
 ## 网页监控相关:
   rsso.html &lt;url&gt; -s &lt;selector&gt;          - 使用 CSS 选择器监控网页
@@ -42,10 +42,6 @@ export const usage = `
   rsso.list
   rsso.edit 1 -t "新标题"
   rsso.html https://example.com -s ".news-item"
-
-## 兼容提示:
-  旧选项 -l / -r / -f / -p 仍会返回迁移提示，
-  建议改用 rsso.list / rsso.remove / rsso.follow / rsso.pull。
 
 </details>
 `

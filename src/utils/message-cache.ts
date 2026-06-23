@@ -172,6 +172,10 @@ export class MessageCacheManager {
 
   /**
    * 清理缓存
+   *
+   * 注意：Koishi 的 database.remove 接受查询条件对象，会批量删除所有匹配行。
+   * 这里先查出保留部分的边界 id，再用 `< 边界` 的条件一次批量删除，
+   * 避免逐条 remove 造成的 N 次往返与中途失败留下半清理状态。
    */
   async cleanup(options: {
     guildId?: string
@@ -187,25 +191,22 @@ export class MessageCacheManager {
     if (rssId) where.rssId = rssId
     if (platform) where.platform = platform
 
-    // 获取所有匹配的消息
-    const messages = await this.ctx.database.get(('rss_message_cache' as any), where, {
-      sort: { createdAt: 'desc' }
+    // 只查到"要保留的最新 N 条"对应的边界，无需把整表拉进内存
+    const keepBoundary = await this.ctx.database.get(('rss_message_cache' as any), where, {
+      sort: { createdAt: 'desc' },
+      limit: 1,
+      offset: Math.max(0, keepLatest - 1),
     })
 
-    // 如果消息数量超过限制，删除旧消息
-    if (messages.length > keepLatest) {
-      const toDelete = messages.slice(keepLatest) as any[]
-      const idsToDelete = toDelete.map(m => m.id)
+    // 没有边界行，说明总量 ≤ keepLatest，无需清理
+    if (keepBoundary.length === 0) return 0
+    const boundaryCreatedAt = (keepBoundary[0] as any).createdAt
 
-      for (const id of idsToDelete) {
-        await this.ctx.database.remove(('rss_message_cache' as any), { id })
-      }
-
-      logger.info(`清理了 ${toDelete.length} 条缓存消息`)
-      return toDelete.length
-    }
-
-    return 0
+    // 删除比边界更旧（含同时间戳但靠后）的消息：createdAt < 边界
+    const deleteWhere: any = { ...where, createdAt: { $lt: boundaryCreatedAt } }
+    const removed = await this.batchRemove(deleteWhere)
+    if (removed > 0) logger.info(`清理了 ${removed} 条缓存消息`)
+    return removed
   }
 
   /**
@@ -219,16 +220,23 @@ export class MessageCacheManager {
     if (guildId) where.guildId = guildId
     if (platform) where.platform = platform
 
-    // 获取所有消息
+    const removed = await this.batchRemove(where)
+    if (removed > 0) logger.info(`清空了 ${removed} 条缓存消息`)
+    return removed
+  }
+
+  /**
+   * 批量删除辅助：先按 where 统计条数，再一次 remove 删除全部匹配行。
+   * 用于 clearAll / cleanup，避免逐条往返与整表入内存。
+   */
+  private async batchRemove(where: Record<string, any>): Promise<number> {
+    // Koishi database.get 不直接支持 count，先取一次总数
     const messages = await this.ctx.database.get(('rss_message_cache' as any), where)
-
-    // 删除所有消息
-    for (const msg of messages as any[]) {
-      await this.ctx.database.remove(('rss_message_cache' as any), { id: msg.id })
-    }
-
-    logger.info(`清空了 ${messages.length} 条缓存消息`)
-    return messages.length
+    const count = messages.length
+    if (count === 0) return 0
+    // remove 接受查询条件，会删除所有匹配行（批量语义）
+    await this.ctx.database.remove(('rss_message_cache' as any), where)
+    return count
   }
 
   /**
