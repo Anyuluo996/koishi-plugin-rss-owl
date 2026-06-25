@@ -13,9 +13,8 @@ export const name = '@anyul/koishi-plugin-rss'
 
 import { createHttpFunction, RequestManager } from './utils/fetcher'
 import { delCache } from './utils/media'
-import { initErrorTracker } from './utils/error-tracker'
 import { resolveTdlBinary } from './utils/tdl'
-import { debug as debugLog } from './utils/logger'
+import { debug as debugLog, applyDebugLevel } from './utils/logger'
 import {
   createCommandRuntimeDeps,
   registerManagementCommands,
@@ -42,6 +41,10 @@ export function apply(ctx: Context, config: Config) {
   // Setup database
   setupDatabase(ctx)
 
+  // 把 config.debug 同步到 Koishi 原生日志分级（Logger.levels['rss-owl']），
+  // 让 WebUI 的 logger 插件 / 全局 levels 都能控制本插件日志可见性。
+  applyDebugLevel(config)
+
   // 启用时探测 tdl 外部二进制可用性，并报告 Koishi ffmpeg 服务注入状态，便于用户排查
   // 探测异步进行、失败仅打日志，不阻塞插件加载
   // 注意：tdl 的版本命令是 `version` 子命令，不是 `-v` flag
@@ -54,17 +57,6 @@ export function apply(ctx: Context, config: Config) {
         : '✗（请安装 koishi-plugin-ffmpeg 插件）'
       debugLog(config, `Telegram 大视频工具探测：tdl=${hasTdl ? '✓' + tdlLoc : '✗（请安装 iyear/tdl 并 tdl login）'}，ffmpeg=${ffmpegStatus}`, 'tdl', 'info')
     }).catch(() => { /* 探测失败忽略 */ })
-  }
-
-  if (config.errorTracking?.enabled) {
-    initErrorTracker({
-      enabled: config.errorTracking.enabled ?? false,
-      dsn: config.errorTracking.dsn || '',
-      environment: config.errorTracking.environment,
-      release: config.errorTracking.release,
-      tracesSampleRate: config.errorTracking.tracesSampleRate,
-      profilesSampleRate: config.errorTracking.profilesSampleRate,
-    })
   }
 
   // Initialize request manager and HTTP function

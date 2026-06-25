@@ -196,14 +196,6 @@ export const Config: Schema<ConfigType> = Schema.object({
     contextFields: Schema.array(Schema.string()).description('要包含的上下文字段（如 guildId, platform 等）').default([]),
     sanitizeLogs: Schema.boolean().description('自动脱敏日志中的敏感信息').default(true),
   }).description('日志设置'),
-  errorTracking: Schema.object({
-    enabled: Schema.boolean().description('启用错误追踪').default(false),
-    dsn: Schema.string().role('secret').description('Sentry DSN').default(''),
-    environment: Schema.string().description('错误追踪环境').default('production'),
-    release: Schema.string().description('错误追踪版本号').default('5.2.48'),
-    tracesSampleRate: Schema.number().min(0).max(1).description('性能追踪采样率').default(0.1),
-    profilesSampleRate: Schema.number().min(0).max(1).description('性能分析采样率').default(0.1),
-  }).description('错误追踪设置'),
   tdl: Schema.object({
     enabled: Schema.boolean().description('启用 Telegram 大视频 tdl 兜底下载<br>当 RSSHub 返回 "Video is too big" 占位时，调用外部 tdl 直接从 Telegram 拉取原始视频。<br><b>需宿主机自行安装</b>: `go install github.com/iyear/tdl@latest` 或下载 [Release](https://github.com/iyear/tdl/releases)，并执行 `tdl login` 完成登录。<br>插件运行时探测 PATH，缺失则跳过、不阻塞主流程。').default(false),
     binPath: Schema.string().description('tdl 二进制路径，默认从 PATH 探测<br>Docker/容器场景下若 tdl 装在持久卷（如 /koishi/bin/tdl），在此指定可避免依赖容器 PATH').default(''),

@@ -6,7 +6,6 @@
 import { Context } from 'koishi'
 import { Config } from '../types'
 import { getFriendlyErrorMessage, normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { debugError } from '../utils/logger'
 
 /**
@@ -87,7 +86,6 @@ function logError(config: Config, operation: string, error: any) {
   }
 
   debugError(config, normalizedError, `${operation} error`, context)
-  trackError(normalizedError, context)
 }
 
 /**

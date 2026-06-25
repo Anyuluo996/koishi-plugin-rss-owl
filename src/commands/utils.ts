@@ -6,7 +6,6 @@
 import { Context, Session } from 'koishi'
 import { Config } from '../types'
 import { getFriendlyErrorMessage, normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { debug } from '../utils/logger'
 
 /**
@@ -74,7 +73,6 @@ export function withCommandErrorHandling(
   return handler().catch((error) => {
     const normalizedError = normalizeError(error)
     debug(config, normalizedError, `${operation} error`, 'error', context)
-    trackError(normalizedError, context)
     return Promise.resolve(`${operation}失败: ${getFriendlyErrorMessage(error, operation)}`)
   })
 }

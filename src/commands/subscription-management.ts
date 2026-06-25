@@ -2,7 +2,6 @@ import { Context } from 'koishi'
 
 import type { Config } from '../types'
 import { getFriendlyErrorMessage, normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { debug } from '../utils/logger'
 import { buildCommandLogContext, checkAuthority, extractSessionInfo } from './utils'
 
@@ -144,7 +143,6 @@ function registerPullCommand(deps: SubscriptionCommandDeps): void {
       } catch (error) {
         const normalizedError = normalizeError(error)
         debug(deps.config, normalizedError, 'pull error', 'error', logContext)
-        trackError(normalizedError, logContext)
         return `拉取失败: ${getFriendlyErrorMessage(error, '获取订阅数据')}`
       }
     })

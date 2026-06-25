@@ -4,7 +4,6 @@ import { quickList } from '../constants'
 import { Config, rssArg } from '../types'
 import { parsePubDate, parseQuickUrl } from '../utils/common'
 import { normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { getResendUpdatedContent, shouldMergeVideo } from '../utils/legacy-config'
 import { createDebugWithContext } from '../utils/logger'
 import { RssItemProcessor } from './item-processor'
@@ -107,10 +106,6 @@ export async function fetchRssItems(
   } catch (error: any) {
     const normalizedError = normalizeError(error)
     feedDebug(`Fetch failed for ${rssItem.title}: ${normalizedError.message}`, 'feeder', 'error', {
-      stage: 'fetch',
-    })
-    trackError(normalizedError, {
-      ...buildFeedLogContext(rssItem),
       stage: 'fetch',
     })
     return []

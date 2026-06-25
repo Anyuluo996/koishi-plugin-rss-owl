@@ -2,7 +2,6 @@ import { Context } from 'koishi'
 
 import { Config } from '../types'
 import { normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { createDebugWithContext } from '../utils/logger'
 import { isQueueDowngradeError } from './notification-queue-retry'
 import { QueueTask, QueueTaskContent } from './notification-queue-types'
@@ -92,10 +91,6 @@ export class NotificationQueueSender {
     } catch (err: any) {
       const normalizedError = normalizeError(err)
       taskDebug(`缓存消息失败: ${normalizedError.message}`, 'cache', 'info')
-      trackError(normalizedError, {
-        ...this.deps.buildTaskLogContext(task),
-        operation: 'cacheMessage',
-      })
     }
   }
 }

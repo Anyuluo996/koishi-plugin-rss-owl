@@ -59,7 +59,6 @@ export interface Config {
   security?: SecurityConfig
   debug?: "disable"|"error"|"info"|"details"
   logging?: LoggingConfig
-  errorTracking?: ErrorTrackingConfig
   tdl?: TdlConfig
 }
 
@@ -228,15 +227,6 @@ export interface LoggingConfig {
   includeContext?: boolean  // 包含额外上下文信息
   contextFields?: string[]  // 要包含的上下文字段
   sanitizeLogs?: boolean  // 是否自动脱敏日志中的敏感信息（默认 true）
-}
-
-export interface ErrorTrackingConfig {
-  enabled?: boolean
-  dsn?: string
-  environment?: string
-  release?: string
-  tracesSampleRate?: number
-  profilesSampleRate?: number
 }
 
 /**

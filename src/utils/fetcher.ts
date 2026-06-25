@@ -3,7 +3,6 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { Context } from 'koishi'
 import { Config, rssArg } from '../types'
 import { normalizeError } from './error-handler'
-import { trackError } from './error-tracker'
 import { createDebugWithContext } from './logger'
 import { sleep } from './common'
 import { validateUrlOrThrow, SecurityError, getSecurityOptions } from './security'
@@ -90,12 +89,6 @@ export const createHttpFunction = (ctx: Context, config: Config, requestManager:
       if (error instanceof SecurityError) {
         const normalizedError = normalizeError(error)
         requestDebug(`URL 安全验证失败: ${normalizedError.message}`, 'security', 'error', {
-          stage: 'security-validation',
-        })
-        trackError(normalizedError, {
-          url,
-          requestType,
-          isHeavyRequest,
           stage: 'security-validation',
         })
         throw error
@@ -202,13 +195,6 @@ export const createHttpFunction = (ctx: Context, config: Config, requestManager:
         ...requestContext,
         status,
         retriesRemaining: 0,
-      })
-      trackError(normalizedError, {
-        url,
-        requestType,
-        isHeavyRequest,
-        status,
-        ...requestContext,
       })
 
       throw normalizedError

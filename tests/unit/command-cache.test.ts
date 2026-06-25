@@ -27,9 +27,6 @@ jest.mock('../../src/utils/logger', () => ({
   debug: jest.fn(),
   debugError: jest.fn(),
 }))
-jest.mock('../../src/utils/error-tracker', () => ({
-  trackError: jest.fn(),
-}))
 
 function makeMessage(over: Partial<CachedMessage> & { id: number }): CachedMessage {
   return {

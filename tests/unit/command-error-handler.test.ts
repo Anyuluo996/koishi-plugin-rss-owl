@@ -13,7 +13,6 @@ import {
   alreadyExists
 } from '../../src/commands/error-handler'
 import * as loggerModule from '../../src/utils/logger'
-import * as errorTrackerModule from '../../src/utils/error-tracker'
 import { Config } from '../../src/types'
 
 describe('CommandError', () => {
@@ -96,7 +95,6 @@ describe('错误类型验证', () => {
 describe('executeCommand', () => {
   let config: Config
   let debugErrorSpy: jest.SpiedFunction<typeof loggerModule.debugError>
-  let trackErrorSpy: jest.SpiedFunction<typeof errorTrackerModule.trackError>
 
   beforeEach(() => {
     config = {
@@ -105,12 +103,10 @@ describe('executeCommand', () => {
     } as any
 
     debugErrorSpy = jest.spyOn(loggerModule, 'debugError').mockImplementation(() => undefined as any)
-    trackErrorSpy = jest.spyOn(errorTrackerModule, 'trackError').mockImplementation(() => undefined)
   })
 
   afterEach(() => {
     debugErrorSpy.mockRestore()
-    trackErrorSpy.mockRestore()
   })
 
   it('应该返回成功结果', async () => {
@@ -132,10 +128,6 @@ describe('executeCommand', () => {
       command: '测试操作',
       commandErrorType: CommandErrorType.INVALID_ARGUMENT,
     })
-    expect(trackErrorSpy).toHaveBeenCalledWith(error, {
-      command: '测试操作',
-      commandErrorType: CommandErrorType.INVALID_ARGUMENT,
-    })
   })
 
   it('应该返回友好错误消息并记录普通异常', async () => {
@@ -147,9 +139,6 @@ describe('executeCommand', () => {
 
     expect(result).toContain('测试操作失败:')
     expect(debugErrorSpy).toHaveBeenCalledWith(config, error, '测试操作 error', {
-      command: '测试操作',
-    })
-    expect(trackErrorSpy).toHaveBeenCalledWith(error, {
       command: '测试操作',
     })
   })

@@ -2,7 +2,6 @@ import { Context } from 'koishi'
 
 import { Config } from '../types'
 import { normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { createDebugWithContext, debug } from '../utils/logger'
 import {
   classifyQueueError,
@@ -138,7 +137,6 @@ export class NotificationQueueManager {
     } catch (err: any) {
       const normalizedError = normalizeError(err)
       debug(this.config, `队列处理异常: ${normalizedError.message}`, 'queue', 'error', { processing: true })
-      trackError(normalizedError, { operation: 'processQueue' })
     } finally {
       this.processing = false
     }
@@ -171,12 +169,6 @@ export class NotificationQueueManager {
     const classification = classifyQueueError(error, task.content)
     const normalizedError = classification.normalizedError
     const errorMsg = normalizedError.message || 'Unknown error'
-
-    trackError(normalizedError, {
-      ...this.buildTaskLogContext(task),
-      failReason: errorMsg,
-      queueErrorAction: classification.action,
-    })
 
     if (classification.action === 'FAILED') {
       await this.store.markTaskFailed(task.id!, errorMsg)

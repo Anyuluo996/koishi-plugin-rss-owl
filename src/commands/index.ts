@@ -4,7 +4,6 @@ import type { Config } from '../types'
 import { NotificationQueueManager } from '../core/notification-queue'
 import { QueueTaskContent } from '../core/notification-queue-types'
 import { normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { debug } from '../utils/logger'
 import { getMessageCache, type CachedMessage, type MessageCacheManager } from '../utils/message-cache'
 import { buildCommandLogContext, checkAuthority, extractSessionInfo } from './utils'
@@ -575,7 +574,6 @@ async function resolveCacheMessageById(
 function logCacheError(config: Config, error: any, scope: string, context?: Record<string, any>): void {
   const normalizedError = normalizeError(error)
   debug(config, normalizedError, scope, 'error', context)
-  trackError(normalizedError, context)
 }
 
 export { registerSubscriptionManagementCommands } from './subscription-management'

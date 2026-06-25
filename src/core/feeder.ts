@@ -3,7 +3,6 @@ import { Context, clone } from 'koishi'
 import { Config, rssArg } from '../types'
 import { parsePubDate } from '../utils/common'
 import { normalizeError } from '../utils/error-handler'
-import { trackError } from '../utils/error-tracker'
 import { getNextUpdateTime, normalizeSubscriptionArg, setNextUpdateTime } from '../utils/legacy-config'
 import { createDebugWithContext, debug } from '../utils/logger'
 import { formatArg, mixinArg } from './feeder-arg'
@@ -173,7 +172,6 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
       const feedContext = buildFeedLogContext(rssItem)
 
       debug(config, `Feeder error for ${rssItem.url}: ${normalizedError.message}`, 'feeder', 'error', feedContext)
-      trackError(normalizedError, feedContext)
     }
   }
 }
@@ -187,10 +185,6 @@ export function startFeeder(ctx: Context, config: Config, $http: any, processor:
   feeder(deps, processor).catch(err => {
     const normalizedError = normalizeError(err)
     lifecycleDebug(`Initial feeder run failed: ${normalizedError.message}`, 'feeder', 'error', {
-      operation: 'initial-feeder-run',
-    })
-    trackError(normalizedError, {
-      lifecycle: 'feeder',
       operation: 'initial-feeder-run',
     })
   })
@@ -216,10 +210,6 @@ export function startFeeder(ctx: Context, config: Config, $http: any, processor:
   queueManager.processQueue().catch(err => {
     const normalizedError = normalizeError(err)
     lifecycleDebug(`Initial queue processing failed: ${normalizedError.message}`, 'queue', 'error', {
-      operation: 'initial-queue-processing',
-    })
-    trackError(normalizedError, {
-      lifecycle: 'feeder',
       operation: 'initial-queue-processing',
     })
   })

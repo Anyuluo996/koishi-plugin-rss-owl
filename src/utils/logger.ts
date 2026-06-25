@@ -5,6 +5,49 @@ const logger = new Logger('rss-owl')
 
 export type DebugLogType = "disable" | "error" | "info" | "details"
 
+/**
+ * 把 config.debug 映射到 Koishi/reggol 的原生日志级别数值。
+ *
+ * reggol 级别（见 reggol/index.d.ts）：
+ *   SILENT=0, SUCCESS/ERROR=1, INFO/WARN=2, DEBUG=3
+ *
+ * 本插件的 debug 字段语义：
+ *   disable → 0（SILENT，什么也不输出）
+ *   error   → 1（仅 error）
+ *   info    → 2（error + info/warn）
+ *   details → 3（含 debug 全量）
+ */
+function debugLevelToReggol(debug?: Config['debug']): number {
+  switch (debug) {
+    case 'error': return Logger.ERROR
+    case 'info': return Logger.INFO
+    case 'details': return Logger.DEBUG
+    default: return Logger.SILENT
+  }
+}
+
+/**
+ * 把 config.debug 同步到 Koishi 原生日志分级 `Logger.levels['rss-owl']`。
+ *
+ * 这样本插件的日志可见性既受自身 debug 字段控制，也能被 Koishi 全局 levels
+ * （WebUI 的 logger 插件、配置文件中的 levels.base / levels['rss-owl']）覆盖/调节。
+ * 应在 apply() 启动时调用一次；值未变化时不重复写入。
+ */
+let lastAppliedLevel: number | undefined
+
+export function applyDebugLevel(config: Config): void {
+  const target = debugLevelToReggol(config.debug)
+  if (lastAppliedLevel === target) return
+  lastAppliedLevel = target
+  Logger.levels = Logger.levels || { base: 2 }
+  ;(Logger.levels as any)['rss-owl'] = target
+}
+
+/**
+ * 按 config.debug 判定某级是否应输出。
+ * 在 debug() 中作为性能预检门控（避免对注定被丢弃的日志做脱敏/格式化），
+ * 与 applyDebugLevel 同步到 Koishi levels 的语义保持一致；最终输出与否仍由 reggol levels 决定。
+ */
 export function shouldLog(config: Config, type: DebugLogType): boolean {
   const typeLevel = debugLevel.findIndex(i => i === type)
   if (typeLevel < 1) return false
@@ -13,6 +56,22 @@ export function shouldLog(config: Config, type: DebugLogType): boolean {
   if (configLevel < 0) return false
 
   return typeLevel <= configLevel
+}
+
+/**
+ * 子命名空间 logger 缓存，避免每条日志都 extend。
+ * 用 logger.extend('feeder') 产出 rss-owl:feeder，命名空间天然带模块名，
+ * 取代此前 formatTextLog 里手工拼 [name] 前缀的做法（与 Koishi Logger 命名空间重复）。
+ */
+const subLoggers = new Map<string, Logger>()
+function getSubLogger(name: string): Logger {
+  if (!name) return logger
+  let sub = subLoggers.get(name)
+  if (!sub) {
+    sub = logger.extend(name)
+    subLoggers.set(name, sub)
+  }
+  return sub
 }
 
 /**
@@ -144,13 +203,19 @@ interface StructuredLogEntry {
   context?: Record<string, any>
 }
 
-function emitLog(type: DebugLogType, content: string): void {
-  if (type === 'error') {
-    logger.error(content)
-    return
-  }
-
-  logger.info(content)
+/**
+ * 按 Koishi 原生日志级别输出。
+ *
+ * 关键纠错：'details' 之前被错压成 logger.info()，现归到 logger.debug()，
+ * 让 reggol 的 levels（SILENT=0 / ERROR=1 / INFO=2 / DEBUG=3）能正确分级过滤。
+ * 模块名 name 通过子命名空间 logger.extend(name) 体现（如 rss-owl:feeder），
+ * 不再手工拼 [name] 前缀。
+ */
+function emitLog(type: DebugLogType, content: string, name = ''): void {
+  const target = getSubLogger(name)
+  if (type === 'error') return target.error(content)
+  if (type === 'info') return target.info(content)
+  return target.debug(content) // 'details'
 }
 
 function filterContextFields(
@@ -192,13 +257,10 @@ function formatTextLog(
   context: Record<string, any> | undefined,
   loggingConfig: Config['logging']
 ): string {
-  const parts: string[] = []
-  if (loggingConfig?.includeModule !== false && name) {
-    parts.push(`[${name}]`)
-  }
-  parts.push(message)
-
-  const textOutput = parts.filter(Boolean).join(' ').trim()
+  // 模块名不再手工拼前缀：已由子命名空间 logger（rss-owl:<name>）体现，
+  // 避免与 Koishi Logger 命名空间重复输出。
+  void name
+  const textOutput = message.trim()
   if (!context || Object.keys(context).length === 0) {
     return textOutput
   }
@@ -232,6 +294,9 @@ export function debug(
   type: DebugLogType = 'details',
   context?: Record<string, any>
 ) {
+  // 性能预检：按 config.debug 快速跳过注定被 Koishi levels 丢弃的日志，
+  // 避免无谓的脱敏/格式化开销。最终是否真正输出由 reggol levels 决定
+  // （applyDebugLevel 已把 config.debug 同步到 Logger.levels['rss-owl']）。
   if (!shouldLog(config, type)) return
 
   // 检查是否启用日志脱敏（默认启用）
@@ -299,9 +364,9 @@ export function debug(
     }
 
     // 输出结构化日志
-    emitLog(type, JSON.stringify(logEntry))
+    emitLog(type, JSON.stringify(logEntry), name)
   } else {
-    emitLog(type, formatTextLog(formattedMessage, name, context, loggingConfig))
+    emitLog(type, formatTextLog(formattedMessage, name, context, loggingConfig), name)
   }
 }
 
