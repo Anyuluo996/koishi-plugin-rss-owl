@@ -84,7 +84,7 @@ function registerRemoveCommand(deps: SubscriptionCommandDeps): void {
       if (options.all) {
         const authorityCheck = checkAuthority(authority, deps.config.basic.authority, `权限不足！当前权限: ${authority}，需要权限: ${deps.config.basic.authority} 或以上`)
         if (!authorityCheck.success) return authorityCheck.message
-        await deps.ctx.database.remove(('rssOwl' as any), { platform, guildId })
+        await deps.ctx.database.remove('rssOwl', { platform, guildId })
         return '✅ 已删除全部订阅'
       }
 
@@ -92,7 +92,7 @@ function registerRemoveCommand(deps: SubscriptionCommandDeps): void {
       const rssItem = getSubscriptionByIndex(rssList, id)
       if (!rssItem) return getSubscriptionNotFoundMessage(id, rssList.length)
 
-      await deps.ctx.database.remove(('rssOwl' as any), { id: rssItem.id })
+      await deps.ctx.database.remove('rssOwl', { id: rssItem.id })
       return `✅ 已删除订阅: ${rssItem.title}`
     })
 }
@@ -172,19 +172,19 @@ function registerFollowCommand(deps: SubscriptionCommandDeps): void {
         if (!authorityCheck.success) return authorityCheck.message
         if (followers.includes('all')) return '💡 已经设置全员提醒'
         followers.push('all')
-        await deps.ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { followers })
+        await deps.ctx.database.set('rssOwl', { id: rssItem.id }, { followers })
         return '✅ 已设置全员提醒'
       }
 
       if (followers.includes(authorId)) return '💡 已经关注过了'
       followers.push(authorId)
-      await deps.ctx.database.set(('rssOwl' as any), { id: rssItem.id }, { followers })
+      await deps.ctx.database.set('rssOwl', { id: rssItem.id }, { followers })
       return '✅ 关注成功'
     })
 }
 
 async function getGuildSubscriptions(ctx: Context, platform: string, guildId: string): Promise<any[]> {
-  return ctx.database.get(('rssOwl' as any), { platform, guildId })
+  return ctx.database.get('rssOwl', { platform, guildId })
 }
 
 function getSubscriptionByIndex(rssList: any[], id: number): any | null {

@@ -63,7 +63,7 @@ export class MessageCacheManager {
     }
 
     // 检查是否已存在（根据 link 去重）
-    const existing = await this.ctx.database.get(('rss_message_cache' as any), {
+    const existing = await this.ctx.database.get('rss_message_cache', {
       link: message.link
     })
 
@@ -73,7 +73,7 @@ export class MessageCacheManager {
     }
 
     // 插入新消息
-    await this.ctx.database.create(('rss_message_cache' as any), cachedMessage)
+    await this.ctx.database.create('rss_message_cache', cachedMessage)
     logger.info(`缓存消息: ${message.title} (RSS: ${message.rssId})`)
 
     // 检查是否需要清理
@@ -110,7 +110,7 @@ export class MessageCacheManager {
     if (platform) where.platform = platform
 
     // 查询消息（按创建时间倒序）
-    const messages = await this.ctx.database.get(('rss_message_cache' as any), where, {
+    const messages = await this.ctx.database.get('rss_message_cache', where, {
       limit,
       offset,
       sort: { createdAt: 'desc' }
@@ -123,7 +123,7 @@ export class MessageCacheManager {
    * 获取单条消息详情
    */
   async getMessage(id: number): Promise<CachedMessage | null> {
-    const messages = await this.ctx.database.get(('rss_message_cache' as any), { id })
+    const messages = await this.ctx.database.get('rss_message_cache', { id })
     return (messages[0] as CachedMessage) || null
   }
 
@@ -139,7 +139,7 @@ export class MessageCacheManager {
     if (platform) where.platform = platform
 
     // 获取所有消息
-    const messages = await this.ctx.database.get(('rss_message_cache' as any), where)
+    const messages = await this.ctx.database.get('rss_message_cache', where)
 
     // 统计
     const stats: CacheStats = {
@@ -192,7 +192,7 @@ export class MessageCacheManager {
     if (platform) where.platform = platform
 
     // 只查到"要保留的最新 N 条"对应的边界，无需把整表拉进内存
-    const keepBoundary = await this.ctx.database.get(('rss_message_cache' as any), where, {
+    const keepBoundary = await this.ctx.database.get('rss_message_cache', where, {
       sort: { createdAt: 'desc' },
       limit: 1,
       offset: Math.max(0, keepLatest - 1),
@@ -231,11 +231,11 @@ export class MessageCacheManager {
    */
   private async batchRemove(where: Record<string, any>): Promise<number> {
     // Koishi database.get 不直接支持 count，先取一次总数
-    const messages = await this.ctx.database.get(('rss_message_cache' as any), where)
+    const messages = await this.ctx.database.get('rss_message_cache', where)
     const count = messages.length
     if (count === 0) return 0
     // remove 接受查询条件，会删除所有匹配行（批量语义）
-    await this.ctx.database.remove(('rss_message_cache' as any), where)
+    await this.ctx.database.remove('rss_message_cache', where)
     return count
   }
 
@@ -285,7 +285,7 @@ export class MessageCacheManager {
     if (platform) where.platform = platform
 
     // 获取所有消息（数据库不支持模糊查询，需要在内存中过滤）
-    let messages = await this.ctx.database.get(('rss_message_cache' as any), where, {
+    let messages = await this.ctx.database.get('rss_message_cache', where, {
       sort: { createdAt: 'desc' }
     })
 

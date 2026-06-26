@@ -18,7 +18,7 @@ export class NotificationQueueStore {
   ) { }
 
   async findTaskByIdentity(identity: QueueTaskIdentity): Promise<QueueTask | null> {
-    const tasks = await this.ctx.database.get((RSS_NOTIFICATION_QUEUE_TABLE as any), identity) as QueueTask[]
+    const tasks = await this.ctx.database.get(RSS_NOTIFICATION_QUEUE_TABLE, identity) as QueueTask[]
 
     if (!tasks.length) {
       return null
@@ -50,7 +50,7 @@ export class NotificationQueueStore {
       updatedAt: new Date(),
     }
 
-    const createdTask = await this.ctx.database.create((RSS_NOTIFICATION_QUEUE_TABLE as any), queueTask) as Partial<QueueTask>
+    const createdTask = await this.ctx.database.create(RSS_NOTIFICATION_QUEUE_TABLE, queueTask) as Partial<QueueTask>
 
     return {
       task: {
@@ -64,13 +64,13 @@ export class NotificationQueueStore {
   async getPendingTasks(): Promise<QueueTask[]> {
     const now = new Date()
     const pendingTasks = await this.ctx.database.get(
-      (RSS_NOTIFICATION_QUEUE_TABLE as any),
+      RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'PENDING' },
       { limit: this.batchSize },
     ) as QueueTask[]
 
     const retryTasks = await this.ctx.database.get(
-      (RSS_NOTIFICATION_QUEUE_TABLE as any),
+      RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'RETRY' },
       { limit: this.batchSize },
     ) as QueueTask[]
@@ -85,7 +85,7 @@ export class NotificationQueueStore {
   }
 
   async markTaskSuccess(taskId: number): Promise<void> {
-    await this.ctx.database.set((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: taskId }, {
+    await this.ctx.database.set(RSS_NOTIFICATION_QUEUE_TABLE, { id: taskId }, {
       status: 'SUCCESS',
       nextRetryTime: null,
       failReason: null,
@@ -94,7 +94,7 @@ export class NotificationQueueStore {
   }
 
   async markTaskRetry(task: QueueTask, nextTime: Date, reason: string): Promise<void> {
-    await this.ctx.database.set((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: task.id }, {
+    await this.ctx.database.set(RSS_NOTIFICATION_QUEUE_TABLE, { id: task.id }, {
       status: 'RETRY',
       nextRetryTime: nextTime,
       retryCount: (task.retryCount || 0) + 1,
@@ -104,7 +104,7 @@ export class NotificationQueueStore {
   }
 
   async updateTaskForDowngrade(task: QueueTask, content: QueueTaskContent): Promise<void> {
-    await this.ctx.database.set((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: task.id }, {
+    await this.ctx.database.set(RSS_NOTIFICATION_QUEUE_TABLE, { id: task.id }, {
       content,
       status: 'RETRY',
       nextRetryTime: new Date(),
@@ -115,7 +115,7 @@ export class NotificationQueueStore {
   }
 
   async markTaskFailed(taskId: number, reason: string): Promise<void> {
-    await this.ctx.database.set((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: taskId }, {
+    await this.ctx.database.set(RSS_NOTIFICATION_QUEUE_TABLE, { id: taskId }, {
       status: 'FAILED',
       nextRetryTime: null,
       failReason: reason,
@@ -125,7 +125,7 @@ export class NotificationQueueStore {
 
   async recoverRetryTasksWithoutNextRetryTime(): Promise<number> {
     const retryTasks = await this.ctx.database.get(
-      (RSS_NOTIFICATION_QUEUE_TABLE as any),
+      RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'RETRY' },
       { limit: this.batchSize },
     ) as QueueTask[]
@@ -133,7 +133,7 @@ export class NotificationQueueStore {
     const invalidTasks = retryTasks.filter(task => !task.nextRetryTime)
 
     for (const task of invalidTasks) {
-      await this.ctx.database.set((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: task.id }, {
+      await this.ctx.database.set(RSS_NOTIFICATION_QUEUE_TABLE, { id: task.id }, {
         status: 'RETRY',
         nextRetryTime: new Date(),
         updatedAt: new Date(),
@@ -144,7 +144,7 @@ export class NotificationQueueStore {
   }
 
   async getStats(): Promise<QueueStats> {
-    const allTasks = await this.ctx.database.get((RSS_NOTIFICATION_QUEUE_TABLE as any), {})
+    const allTasks = await this.ctx.database.get(RSS_NOTIFICATION_QUEUE_TABLE, {})
 
     return {
       pending: allTasks.filter((task: any) => task.status === 'PENDING').length,
@@ -156,11 +156,11 @@ export class NotificationQueueStore {
 
   async retryFailedTasks(taskId?: number): Promise<number> {
     const where = taskId ? { id: taskId } : { status: 'FAILED' }
-    const tasks = await this.ctx.database.get((RSS_NOTIFICATION_QUEUE_TABLE as any), where) as QueueTask[]
+    const tasks = await this.ctx.database.get(RSS_NOTIFICATION_QUEUE_TABLE, where) as QueueTask[]
     const failedTasks = tasks.filter(task => task.status === 'FAILED')
 
     for (const task of failedTasks) {
-      await this.ctx.database.set((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: task.id }, {
+      await this.ctx.database.set(RSS_NOTIFICATION_QUEUE_TABLE, { id: task.id }, {
         status: 'PENDING',
         retryCount: 0,
         nextRetryTime: null,
@@ -175,12 +175,12 @@ export class NotificationQueueStore {
   async cleanupSuccessTasks(olderThanHours: number = 24): Promise<number> {
     const cutoffTime = new Date(Date.now() - olderThanHours * 60 * 60 * 1000)
     const tasks = await this.ctx.database.get(
-      (RSS_NOTIFICATION_QUEUE_TABLE as any),
+      RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'SUCCESS', updatedAt: { $lt: cutoffTime } },
     ) as QueueTask[]
 
     for (const task of tasks) {
-      await this.ctx.database.remove((RSS_NOTIFICATION_QUEUE_TABLE as any), { id: task.id })
+      await this.ctx.database.remove(RSS_NOTIFICATION_QUEUE_TABLE, { id: task.id })
     }
 
     return tasks.length

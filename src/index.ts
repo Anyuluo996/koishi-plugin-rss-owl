@@ -35,7 +35,9 @@ import { NotificationQueueManager } from './core/notification-queue'
 import { setupDatabase } from './database'
 import { usage, quickList } from './constants'
 
-export const inject = { required: ["database"], optional: ["puppeteer", "censor", "assets", "server", "ffmpeg"] }
+// Koishi 4.11+ 约定：必需服务用 `using` 声明（替代旧 `inject`）。
+// 可选服务（puppeteer/censor/assets/server/ffmpeg）不在此声明，代码内统一用可选链访问。
+export const using = ['database']
 
 export function apply(ctx: Context, config: Config) {
   // Setup database

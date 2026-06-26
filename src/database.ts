@@ -1,7 +1,7 @@
 import { Context } from 'koishi'
 
 export function setupDatabase(ctx: Context) {
-  ctx.model.extend(('rssOwl' as any), {
+  ctx.model.extend('rssOwl', {
     id: "integer",
     url: "text",
     platform: "string",
@@ -18,7 +18,7 @@ export function setupDatabase(ctx: Context) {
   })
 
   // 消息缓存表
-  ctx.model.extend(('rss_message_cache' as any), {
+  ctx.model.extend('rss_message_cache', {
     id: "integer",
     rssId: "string",
     guildId: "string",
@@ -36,7 +36,7 @@ export function setupDatabase(ctx: Context) {
   })
 
   // 消息发送队列表 - 用于可靠的消息推送
-  ctx.model.extend(('rss_notification_queue' as any), {
+  ctx.model.extend('rss_notification_queue', {
     id: "integer",
     subscribeId: "string",      // 关联的订阅ID（rssOwl表的id）
     rssId: "string",            // 订阅源标识（用于显示）

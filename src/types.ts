@@ -19,31 +19,60 @@ declare module 'koishi' {
   }
 }
 
-declare module 'koishi' {
-  interface rssOwl {
-    id: string | number
-    url: string
-    platform: string
-    guildId: string
-    author: string
-    rssId: string | number
-    arg: rssArg,
-    title: string
-    lastPubDate: Date
-  }
+// 数据库表行类型：与 src/database.ts 的 model.extend 字段对齐。
+// Koishi 约定：通过 `Tables` 接口注册表名 -> 行类型映射，
+// 之后 ctx.model.extend('rssOwl', ...) 与 ctx.database.get('rssOwl', ...) 自动获得类型。
+export interface RssOwlRow {
+  id: number
+  url: string
+  platform: string
+  guildId: string
+  author: string
+  rssId: string
+  arg: rssArg
+  lastContent: any
+  title: string
+  followers: string[]
+  lastPubDate: Date
+}
 
-  interface rss_message_cache {
-    id: number
-    rssId: string
-    guildId: string
-    platform: string
-    title: string
-    content: string
-    link: string
-    pubDate: Date
-    imageUrl: string
-    videoUrl: string
-    createdAt: Date
+export interface RssMessageCacheRow {
+  id: number
+  rssId: string
+  guildId: string
+  platform: string
+  title: string
+  content: string
+  link: string
+  pubDate: Date
+  imageUrl: string
+  videoUrl: string
+  finalMessage: string
+  createdAt: Date
+}
+
+export interface RssNotificationQueueRow {
+  id: number
+  subscribeId: string
+  rssId: string
+  uid: string
+  guildId: string
+  platform: string
+  content: any
+  status: string
+  retryCount: number
+  nextRetryTime: Date
+  createdAt: Date
+  updatedAt: Date
+  failReason: string
+}
+
+// Koishi 数据库表名 -> 行类型映射（4.x 标准扩展点）
+declare module 'koishi' {
+  interface Tables {
+    rssOwl: RssOwlRow
+    rss_message_cache: RssMessageCacheRow
+    rss_notification_queue: RssNotificationQueueRow
   }
 }
 

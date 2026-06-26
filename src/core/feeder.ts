@@ -52,7 +52,7 @@ function shouldSkipByInterval(rssItem: any, arg: rssArg, originalArg: Record<str
 }
 
 async function persistSubscriptionState(ctx: Context, rssItemId: number, state: Record<string, any>): Promise<void> {
-  await ctx.database.set(('rssOwl' as any), { id: rssItemId }, state)
+  await ctx.database.set('rssOwl', { id: rssItemId }, state)
 }
 
 function buildQueueUid(item: any, config: Config): string {
@@ -71,7 +71,7 @@ function buildQueueUid(item: any, config: Config): string {
 export async function feeder(deps: FeederDependencies, processor: RssItemProcessor) {
   const { ctx, config, $http, queueManager } = deps
 
-  const rssList = await ctx.database.get(('rssOwl' as any), {})
+  const rssList = await ctx.database.get('rssOwl', {})
   if (!rssList || rssList.length === 0) return
 
   for (const rssItem of rssList) {
