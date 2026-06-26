@@ -4,6 +4,17 @@ import * as cheerio from 'cheerio'
 
 export const sleep = (delay = 1000) => new Promise(resolve => setTimeout(resolve, delay))
 
+/**
+ * 标准化 RSS 字段内容，统一数组 / 空值 / 非字符串输入。
+ *
+ * 统一入口，避免在各 core 模块内重复定义私有副本。
+ */
+export function normalizeText(value: unknown): string {
+  if (Array.isArray(value)) return value.join('')
+  if (value === undefined || value === null) return ''
+  return String(value)
+}
+
 // 安全的时间解析函数，处理各种格式
 export const parsePubDate = (config: Config, pubDate: any): Date => {
   if (!pubDate) return new Date(0)
@@ -92,33 +103,8 @@ export const parseQuickUrl = (url: string, rssHubUrl: string, quickList: any[]):
   if (!routeMatch) return url
   let route = routeMatch[0]
 
-  const parseContent = (template: string, item: any): string => {
-    return template.replace(/{{(.+?)}}/g, (i: string) => {
-      // 添加空值检查，防止 match 返回 null 时崩溃
-      const match = i.match(/^{{(.*)}}$/)
-      if (!match) return i
-
-      const content = match[1]
-      if (!content) return i
-
-      return content.split("|").reduce((t: any, v: string) => {
-        const literalMatch = v.match(/^'(.*)'$/)
-        if (literalMatch) {
-          return t || literalMatch[1]
-        }
-
-        return v.split(".").reduce((t: any, v: any) => {
-          if (new RegExp("Date").test(v)) {
-            const dateVal = t?.[v]
-            return dateVal ? new Date(dateVal).toLocaleString('zh-CN') : ""
-          }
-          return t?.[v] || ""
-        }, item)
-      }, '')
-    })
-  }
-
-  let rUrl = parseContent(correntQuickObj.replace, { rsshub: rssHubUrl, route })
+  // 复用模块级 parseTemplateContent，避免内嵌重复实现
+  const rUrl = parseTemplateContent(correntQuickObj.replace, { rsshub: rssHubUrl, route })
   return rUrl
 }
 

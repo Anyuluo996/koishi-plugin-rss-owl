@@ -11,7 +11,7 @@ import {
   invalidArgument,
   notFound,
   alreadyExists
-} from '../../src/commands/error-handler'
+} from '../../src/utils/error-handler'
 import * as loggerModule from '../../src/utils/logger'
 import { Config } from '../../src/types'
 

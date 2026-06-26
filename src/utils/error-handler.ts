@@ -4,6 +4,10 @@
  * 将技术性错误转换为用户友好的提示信息
  */
 
+import { Context } from 'koishi'
+import type { Config } from '../types'
+import { debugError } from './logger'
+
 /**
  * 错误类型枚举
  */
@@ -309,4 +313,149 @@ export function isRetryable(error: any): boolean {
 
   // 其他错误不建议重试
   return false
+}
+
+// ============================================================================
+// 命令层错误处理（原 src/commands/error-handler.ts，2026-06-26 收敛至此）
+// CommandError 是通用错误类型，不应绑定在 commands 层；统一归口到 error-handler。
+// ============================================================================
+
+/**
+ * 命令执行结果
+ */
+export interface CommandResult {
+  success: boolean
+  message: string
+  error?: any
+}
+
+/**
+ * 命令错误类型
+ */
+export enum CommandErrorType {
+  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  INVALID_ARGUMENT = 'INVALID_ARGUMENT',
+  NOT_FOUND = 'NOT_FOUND',
+  ALREADY_EXISTS = 'ALREADY_EXISTS',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+}
+
+/**
+ * 命令错误类
+ */
+export class CommandError extends Error {
+  constructor(
+    public type: CommandErrorType,
+    message: string,
+    public details?: any
+  ) {
+    super(message)
+    this.name = 'CommandError'
+  }
+}
+
+/**
+ * 包装命令执行，提供统一的错误处理
+ */
+export async function executeCommand(
+  ctx: Context,
+  config: Config,
+  operationName: string,
+  handler: () => Promise<string>
+): Promise<string> {
+  try {
+    return await handler()
+  } catch (error) {
+    // 如果是 CommandError，使用自定义消息
+    if (error instanceof CommandError) {
+      logCommandError(config, operationName, error)
+      return formatCommandError(error)
+    }
+
+    // 其他错误使用友好错误消息
+    logCommandError(config, operationName, error)
+    const friendlyMessage = getFriendlyErrorMessage(error, operationName)
+    return `${operationName}失败: ${friendlyMessage}`
+  }
+}
+
+/**
+ * 记录命令错误
+ */
+function logCommandError(config: Config, operation: string, error: any) {
+  const normalizedError = normalizeError(error, `${operation} failed`)
+  const context: Record<string, any> = {
+    command: operation,
+  }
+
+  if (error instanceof CommandError) {
+    context.commandErrorType = error.type
+  }
+
+  if (normalizedError && typeof (normalizedError as any).code === 'string') {
+    context.errorCode = (normalizedError as any).code
+  }
+
+  debugError(config, normalizedError, `${operation} error`, context)
+}
+
+/**
+ * 格式化命令错误消息
+ */
+function formatCommandError(error: CommandError): string {
+  switch (error.type) {
+    case CommandErrorType.PERMISSION_DENIED:
+      return error.message
+    case CommandErrorType.INVALID_ARGUMENT:
+      return `参数错误: ${error.message}`
+    case CommandErrorType.NOT_FOUND:
+      return `未找到: ${error.message}`
+    case CommandErrorType.ALREADY_EXISTS:
+      return `已存在: ${error.message}`
+    case CommandErrorType.NETWORK_ERROR:
+      return `网络错误: ${error.message}`
+    default:
+      return error.message || '操作失败，请稍后重试'
+  }
+}
+
+/**
+ * 创建权限检查错误
+ */
+export function permissionDenied(customMessage?: string): CommandError {
+  return new CommandError(
+    CommandErrorType.PERMISSION_DENIED,
+    customMessage || '权限不足'
+  )
+}
+
+/**
+ * 创建参数错误
+ */
+export function invalidArgument(message: string): CommandError {
+  return new CommandError(
+    CommandErrorType.INVALID_ARGUMENT,
+    message
+  )
+}
+
+/**
+ * 创建未找到错误
+ */
+export function notFound(resource: string): CommandError {
+  return new CommandError(
+    CommandErrorType.NOT_FOUND,
+    resource
+  )
+}
+
+/**
+ * 创建已存在错误
+ */
+export function alreadyExists(resource: string): CommandError {
+  return new CommandError(
+    CommandErrorType.ALREADY_EXISTS,
+    resource
+  )
 }
