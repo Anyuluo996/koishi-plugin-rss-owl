@@ -121,7 +121,7 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
         return '❌ URL 格式不正确，请以 http:// 或 https:// 开头'
       }
 
-      const rssList = await deps.ctx.database.get(('rssOwl' as any), { platform, guildId })
+      const rssList = await deps.ctx.database.get('rssOwl', { platform, guildId })
 
       if (rssList.find(item => item.url === url)) return '❌ 该订阅已存在'
 
@@ -193,7 +193,7 @@ export function registerSubscriptionCreateCommand(deps: SubscriptionCreateComman
           return `❌ 订阅已存在: ${rssItem.rssId}`
         }
 
-        await deps.ctx.database.create(('rssOwl' as any), rssItem)
+        await deps.ctx.database.create('rssOwl', rssItem)
 
         if (deps.config.basic.firstLoad && arg.firstLoad !== false && rssItemList.length > 0) {
           let itemArray = rssItemList.sort((a, b) => deps.parsePubDate(b.pubDate).getTime() - deps.parsePubDate(a.pubDate).getTime())

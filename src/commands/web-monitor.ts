@@ -89,7 +89,7 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
           return buildItemsPreview(items, `找到 ${items.length} 个元素:`, true)
         }
 
-        const rssList = await deps.ctx.database.get(('rssOwl' as any), { platform, guildId })
+        const rssList = await deps.ctx.database.get('rssOwl', { platform, guildId })
         if (rssList.find(item => item.url === normalizedUrl)) return '❌ 该订阅已存在'
 
         const htmlItems = await deps.getRssData(normalizedUrl, arg)
@@ -113,7 +113,7 @@ HTML 网页监控功能，使用 CSS 选择器提取内容
           return `❌ 订阅已存在: ${rssItem.rssId}`
         }
 
-        await deps.ctx.database.create(('rssOwl' as any), rssItem)
+        await deps.ctx.database.create('rssOwl', rssItem)
 
         if (deps.config.basic.firstLoad && arg.firstLoad !== false && htmlItems.length > 0) {
           await broadcastInitialItems(deps, `${platform}:${guildId}`, htmlItems, rssItem)
