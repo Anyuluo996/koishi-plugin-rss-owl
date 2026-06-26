@@ -1,10 +1,10 @@
 import axios from 'axios'
-import { HttpsProxyAgent } from 'https-proxy-agent'
 import { Context } from 'koishi'
 import { Config, rssArg } from '../types'
 import { normalizeError } from './error-handler'
 import { createDebugWithContext } from './logger'
 import { sleep } from './common'
+import { buildAxiosProxyConfig, mergeProxyAgent } from './proxy'
 import { validateUrlOrThrow, SecurityError, getSecurityOptions } from './security'
 
 // 简化版 RequestManager，仅用于普通 API 请求，大文件下载建议绕过
@@ -110,35 +110,21 @@ export const createHttpFunction = (ctx: Context, config: Config, requestManager:
         ...(arg.proxyAgent?.enabled ? {} : {})
       }
 
-      // 代理配置
-      let currentProxyAgent = arg?.proxyAgent
-
-      // 防御性：如果 arg 中没有有效的代理配置，尝试使用全局配置（作为安全网）
-      if (!currentProxyAgent || currentProxyAgent.enabled === undefined || currentProxyAgent.enabled === null) {
-        if (config.net?.proxyAgent?.enabled) {
-          currentProxyAgent = {
-            enabled: true,
-            protocol: config.net.proxyAgent.protocol,
-            host: config.net.proxyAgent.host,
-            port: config.net.proxyAgent.port,
-            auth: config.net.proxyAgent.auth?.enabled ? config.net.proxyAgent.auth : undefined
-          }
-          requestDebug(`[DEBUG_PROXY] fetcher 使用防御性全局代理`, 'request', 'details', {
-            proxyEnabled: true,
-            proxyUrl: config.net.proxyAgent.host
-              ? `${config.net.proxyAgent.protocol}://${config.net.proxyAgent.host}:${config.net.proxyAgent.port}`
-              : '',
-          })
-        }
-      }
-
+      // 代理配置：复用 utils/proxy.ts 的合并 + 构造 helper（CLAUDE.md:346 规范）
+      // mergeProxyAgent 已处理“arg 缺失回落全局 / arg 不完整用全局补全”的防御性逻辑
+      const currentProxyAgent = mergeProxyAgent(arg?.proxyAgent, config.net?.proxyAgent, config)
       const proxyEnabled = Boolean(currentProxyAgent?.enabled)
+
       let proxyUrl = ''
       if (proxyEnabled && currentProxyAgent.host) {
         proxyUrl = `${currentProxyAgent.protocol}://${currentProxyAgent.host}:${currentProxyAgent.port}`
-        const agent = new HttpsProxyAgent(proxyUrl)
-
-        configObj.httpsAgent = agent
+        requestDebug(`[DEBUG_PROXY] fetcher 使用代理`, 'request', 'details', {
+          proxyEnabled: true,
+          proxyUrl,
+        })
+        // 用合并后的片段构造 axios 代理配置，与 ai-client / search-providers 同源
+        const proxyConfig = buildAxiosProxyConfig({ net: { proxyAgent: currentProxyAgent } } as Config)
+        configObj.httpsAgent = proxyConfig.httpsAgent
         configObj.proxy = false  // 禁用 axios 原生 proxy
       }
 

@@ -20,6 +20,7 @@
  */
 
 import { Config, rssArg } from '../types'
+import { normalizeText } from '../utils/common'
 import { debug } from '../utils/logger'
 import { getCacheDir } from '../utils/media'
 import {
@@ -242,8 +243,4 @@ function escapeAttr(s: string): string {
   return String(s || '').replace(/"/g, '&quot;')
 }
 
-function normalizeText(v: unknown): string {
-  if (Array.isArray(v)) return v.join('')
-  if (v === undefined || v === null) return ''
-  return String(v)
-}
+// normalizeText 已收敛到 utils/common.ts

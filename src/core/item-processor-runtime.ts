@@ -3,6 +3,7 @@ import { Context, h } from 'koishi'
 import { marked } from 'marked'
 
 import { Config, rssArg } from '../types'
+import { normalizeText } from '../utils/common'
 import { debug } from '../utils/logger'
 import { getImageUrl, getVideoUrl, puppeteerToFile } from '../utils/media'
 import { preprocessHtmlImages, renderHtml2Image } from './renderer'
@@ -87,12 +88,10 @@ async function prepareHtmlForRender(
 
 /**
  * 标准化 RSS 字段内容，统一数组 / 空值 / 非字符串输入。
+ *
+ * 实现已收敛到 `utils/common.ts`，此处 re-export 以维持现有 import 路径不变。
  */
-export function normalizeText(value: unknown): string {
-  if (Array.isArray(value)) return value.join('')
-  if (value === undefined || value === null) return ''
-  return String(value)
-}
+export { normalizeText }
 
 /**
  * 解析并去重 HTML 中的图片资源，返回原图到最终地址的映射表。

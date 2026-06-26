@@ -5,8 +5,6 @@
 
 import { Context, Session } from 'koishi'
 import { Config } from '../types'
-import { getFriendlyErrorMessage, normalizeError } from '../utils/error-handler'
-import { debug } from '../utils/logger'
 
 /**
  * 命令执行上下文
@@ -58,23 +56,6 @@ export function buildCommandLogContext(session: Session, command?: string, opera
   if (operation) context.operation = operation
 
   return context
-}
-
-/**
- * 命令错误处理包装器
- * 统一处理命令执行中的错误
- */
-export function withCommandErrorHandling(
-  config: Config,
-  operation: string,
-  handler: () => Promise<string>,
-  context?: Record<string, any>
-): Promise<string> {
-  return handler().catch((error) => {
-    const normalizedError = normalizeError(error)
-    debug(config, normalizedError, `${operation} error`, 'error', context)
-    return Promise.resolve(`${operation}失败: ${getFriendlyErrorMessage(error, operation)}`)
-  })
 }
 
 /**

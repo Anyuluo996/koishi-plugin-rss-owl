@@ -1,5 +1,6 @@
 import { Config, rssArg } from '../types'
 import { normalizeBasicConfig, normalizeSubscriptionArg } from '../utils/legacy-config'
+import { mergeProxyAgent } from '../utils/proxy'
 import { debug } from '../utils/logger'
 
 const ARG_ENTRY_KEYS = [
@@ -117,49 +118,7 @@ function parseProxyAgentArg(value: unknown, auth?: string): rssArg['proxyAgent']
   }
 }
 
-function mergeProxyAgent(argProxy: any, configProxy: any, config: Config) {
-  debug(config, `合并代理配置 - argProxy: ${JSON.stringify(argProxy)}, configProxy.enabled: ${configProxy?.enabled}`, 'proxy merge debug', 'details')
-
-  if (argProxy?.enabled === false) {
-    debug(config, '订阅明确禁用代理', 'proxy merge', 'details')
-    return { enabled: false }
-  }
-
-  if (argProxy?.enabled === true && argProxy?.host) {
-    debug(config, '使用订阅的代理配置', 'proxy merge', 'details')
-    return argProxy
-  }
-
-  const shouldUseConfigProxy = !argProxy || Object.keys(argProxy || {}).length === 0 || argProxy?.enabled === undefined || argProxy?.enabled === null
-
-  if (shouldUseConfigProxy) {
-    if (configProxy?.enabled) {
-      const result = {
-        enabled: true,
-        protocol: configProxy.protocol,
-        host: configProxy.host,
-        port: configProxy.port,
-        auth: configProxy.auth?.enabled ? configProxy.auth : undefined,
-      }
-      debug(config, `使用全局代理: ${result.protocol}://${result.host}:${result.port}`, 'proxy merge', 'info')
-      return result
-    }
-    debug(config, '全局代理未启用', 'proxy merge', 'details')
-  }
-
-  if (argProxy?.enabled === true && !argProxy?.host) {
-    const result = {
-      ...configProxy,
-      ...argProxy,
-      auth: configProxy?.auth?.enabled ? configProxy.auth : undefined,
-    }
-    debug(config, '订阅代理配置不完整，补充全局配置', 'proxy merge', 'details')
-    return result
-  }
-
-  debug(config, '代理未配置，使用默认(禁用)', 'proxy merge', 'details')
-  return { enabled: false }
-}
+// mergeProxyAgent 已提升到 utils/proxy.ts，统一代理 helper 归属
 
 function mergeProxyAgentWithLog(argProxy: any, configProxy: any, config: Config) {
   const result = mergeProxyAgent(argProxy, configProxy, config)
