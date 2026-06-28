@@ -22,8 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Koishi 4.x 支持 Node 18+；覆盖 LTS 与当前活跃版
-        node: ['18', '20']
+        # Node 18 已 EOL，且代码依赖 Node 20+ 全局 (File API)。
+        # 覆盖当前活跃 LTS (20/22)。
+        node: ['20', '22']
 
     steps:
       - name: Checkout
