@@ -52,7 +52,7 @@ export async function getRssData(
 
         // 等待特定元素或时间
         if (arg.waitSelector) {
-          try { await page.waitForSelector(arg.waitSelector, { timeout: 5000 }) } catch (e) {}
+          try { await page.waitForSelector(arg.waitSelector, { timeout: 5000 }) } catch {}
         } else if (arg.waitFor) {
           await new Promise(r => setTimeout(r, arg.waitFor))
         }
@@ -66,7 +66,7 @@ export async function getRssData(
         rssData = await page.content()
         contentType = 'text/html'
       } finally {
-        try { await page.close() } catch (e) { /* 忽略页面已关闭的错误 */ }
+        try { await page.close() } catch { /* 忽略页面已关闭的错误 */ }
       }
     } else {
       // 静态模式：使用 axios
@@ -84,7 +84,7 @@ export async function getRssData(
       try {
         rssData = JSON.parse(rssData);
         isJson = true;
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
 
     if (isJson) {
@@ -156,7 +156,7 @@ export async function getRssData(
         if (link && !link.startsWith('http')) {
            try {
              link = new URL(link, url).href;
-           } catch (e) {}
+           } catch {}
         }
 
         // 3. 提取内容

@@ -311,7 +311,7 @@ async function handleCacheList(cmdCtx: CacheCommandContext, args: string[], conf
 }
 
 async function handleCacheMessage(cmdCtx: CacheCommandContext, args: string[], config: Config): Promise<string> {
-  const { cache, logContext } = cmdCtx
+  const { logContext } = cmdCtx
   const realId = parseInt(args[0])
   if (!realId || realId < 1) {
     return '请提供真实 ID\n用法: rsso.cache message <ID>\n示例: rsso.cache message 42\n💡 提示：使用 "rsso.cache list" 查看方括号中的真实 ID'

@@ -1,6 +1,6 @@
 import { Schema } from 'koishi'
 // 导入接口时重命名为 ConfigType，避免与下方的常量名冲突
-import { Config as ConfigType, BasicConfig, TemplateConfig, NetConfig, MsgConfig, AiConfig, SearchConfig, proxyAgent, SecurityConfig } from './types'
+import { Config as ConfigType, SearchConfig } from './types'
 
 export const templateList = ['auto','content', 'only text', 'only media','only image', 'only video', 'proto', 'default', 'only description', 'custom','link'] as const
 

@@ -1,6 +1,6 @@
 import { Context } from 'koishi'
 
-import type { Config, TemplateType } from '../types'
+import type { Config } from '../types'
 import { ensureUrlProtocol } from '../utils/common'
 import { getFriendlyErrorMessage } from '../utils/error-handler'
 import { buildCommandLogContext, checkAuthority, extractSessionInfo, parseTarget, isValidUrl } from './utils'
@@ -38,23 +38,6 @@ export function resolveQuickItem(
   }
 
   return null
-}
-
-interface CreateCommandOptions {
-  quick?: string
-  list?: string
-  remove?: string
-  removeAll?: boolean
-  follow?: string
-  followAll?: string
-  target?: string
-  arg?: string
-  template?: TemplateType
-  title?: string
-  pull?: string
-  force?: boolean
-  daily?: string
-  test?: boolean
 }
 
 export interface SubscriptionCreateCommandDeps {

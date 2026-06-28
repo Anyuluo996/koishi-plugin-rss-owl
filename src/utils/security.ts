@@ -1,5 +1,4 @@
 import { Config } from '../types'
-import { debug } from './logger'
 
 /**
  * 安全验证错误类

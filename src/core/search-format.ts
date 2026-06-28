@@ -26,7 +26,7 @@ export function formatSearchResults(response: SearchResponse): string {
 export function buildPromptWithSearchContext(
   originalPrompt: string,
   searchResults: SearchResponse,
-  searchQuery: string
+  _searchQuery: string
 ): string {
   if (!searchResults.success || searchResults.results.length === 0) {
     return originalPrompt
