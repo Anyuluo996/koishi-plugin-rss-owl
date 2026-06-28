@@ -149,7 +149,7 @@ export async function renderHtml2Image(
   htmlContent: string,
   arg?: rssArg
 ): Promise<any> {
-  let page = await ctx.puppeteer.page()
+  const page = await ctx.puppeteer.page()
   try {
     debug(config, htmlContent, 'htmlContent', 'details')
     const initialViewportHeight = 2000
@@ -287,9 +287,9 @@ export async function renderHtml2Image(
     }
 
     let height = actualHeight
-    let width = clipWidth
-    let x = clipX
-    let y = clipY
+    const width = clipWidth
+    const x = clipX
+    const y = clipY
 
     // 保守处理：如果高度异常，使用更小的值
     if (height > 5000) {
@@ -297,7 +297,7 @@ export async function renderHtml2Image(
       height = Math.min(height, 2000)
     }
 
-    let size = 10000
+    const size = 10000
     debug(config, [height, width, x, y], 'pptr img size', 'details')
     const split = Math.ceil(height / size)
 
@@ -325,7 +325,7 @@ export async function renderHtml2Image(
     // 最后一份使用完整高度减去前面所有份的高度，确保覆盖全部内容
     const reduceHeight = (index: number) => index === split - 1 ? height - reduceY(index) : Math.floor(height / split)
 
-    let imgData = await Promise.all(
+    const imgData = await Promise.all(
       Array.from({ length: split }, async (v, i) =>
         await page.screenshot({
           type: "png",

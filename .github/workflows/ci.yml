@@ -1,0 +1,58 @@
+# CI 质量门禁
+# 目标：PR / push 到 main 时自动跑类型检查 + 单元测试，保持主干绿灯。
+# 不发版、不部署。测试已脱离外部网络依赖（集成测试已解耦），CI 稳定。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支的并发 push 取消旧任务，节省 CI 资源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint & Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Koishi 4.x 支持 Node 18+；覆盖 LTS 与当前活跃版
+        node: ['18', '20']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check (tsc --noEmit)
+        run: pnpm run typecheck
+
+      - name: Lint (eslint)
+        run: pnpm run lint
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm test
+        env:
+          CI: 'true'
