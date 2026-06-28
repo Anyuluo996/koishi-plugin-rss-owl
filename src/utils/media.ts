@@ -16,10 +16,10 @@ async function tryUnlink(filePath: string | null): Promise<void> {
 }
 
 export const getCacheDir = (config: Config) => {
-  let dir = config.basic.cacheDir ? path.resolve('./', config.basic.cacheDir || "") : `${__dirname}/cache`
-  let mkdir = (path: string, deep = 2) => {
-    let dir = path.split("\\").splice(0, deep).join("\\")
-    let dirDeep = path.split("\\").length
+  const dir = config.basic.cacheDir ? path.resolve('./', config.basic.cacheDir || "") : `${__dirname}/cache`
+  const mkdir = (path: string, deep = 2) => {
+    const dir = path.split("\\").splice(0, deep).join("\\")
+    const dirDeep = path.split("\\").length
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir);
     }
@@ -34,13 +34,13 @@ export const getCacheDir = (config: Config) => {
 export const writeCacheFile = async (fileUrl: string, config: Config): Promise<string> => {
   const cacheDir = getCacheDir(config)
   debug(config, cacheDir, 'cacheDir', 'details')
-  let suffix = /(?<=^data:.+?\/).+?(?=;base64)/.exec(fileUrl)?.[0] || 'bin'
+  const suffix = /(?<=^data:.+?\/).+?(?=;base64)/.exec(fileUrl)?.[0] || 'bin'
 
   // 使用时间戳 + 随机数生成唯一文件名，避免竞态条件
-  let fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}.${suffix}`
+  const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}.${suffix}`
 
-  let base64Data = fileUrl.replace(/^data:.+?;base64,/, "");
-  let filePath = `${cacheDir}/${fileName}`
+  const base64Data = fileUrl.replace(/^data:.+?;base64,/, "");
+  const filePath = `${cacheDir}/${fileName}`
   fs.writeFileSync(filePath, base64Data, 'base64')
   if (config.basic.replaceDir) {
     return `file:///${config.basic.replaceDir}/${fileName}`
@@ -101,10 +101,10 @@ export const getImageUrl = async (
     return ''
   }
 
-  let contentType = res.headers["content-type"] || 'image/jpeg'
-  let suffix = contentType?.split('/')[1] || 'jpg'
-  let base64Prefix = `data:${contentType};base64,`
-  let base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
+  const contentType = res.headers["content-type"] || 'image/jpeg'
+  const suffix = contentType?.split('/')[1] || 'jpg'
+  const base64Prefix = `data:${contentType};base64,`
+  const base64Data = base64Prefix + Buffer.from(res.data, 'binary').toString('base64')
 
   // 根据发送模式处理
   const imageMode = config.basic.imageMode
@@ -116,14 +116,14 @@ export const getImageUrl = async (
 
   // File 模式：下载到本地，返回 file:// URL
   if (imageMode == 'File') {
-    let fileUrl = await writeCacheFile(base64Data, config)
+    const fileUrl = await writeCacheFile(base64Data, config)
     return fileUrl
   }
 
   // assets 模式：下载到本地，上传到 assets，返回 assets URL
   if (imageMode === 'assets' && ctx.assets) {
     try {
-      let assetUrl = await ctx.assets.upload(base64Data, `rss-img-${Date.now()}.${suffix}`)
+      const assetUrl = await ctx.assets.upload(base64Data, `rss-img-${Date.now()}.${suffix}`)
       debug(config, `图片 Assets 上传成功: ${assetUrl}`, 'assets', 'info')
       return assetUrl
     } catch (error) {
@@ -145,7 +145,7 @@ export const getVideoUrl = async (
   useBase64Mode = false,
   dom: any
 ): Promise<string> => {
-  let src = dom.attribs.src || dom.children["0"].attribs.src
+  const src = dom.attribs.src || dom.children["0"].attribs.src
 
   // 根据发送模式处理
   const videoMode = config.basic.videoMode
@@ -221,9 +221,9 @@ export const getVideoUrl = async (
   // 源文件不再需要 —— 立即删，避免几十 MB 视频在缓存目录堆积
   await tryUnlink(localSourcePath)
 
-  let suffix = contentType?.split('/')[1] || 'mp4'
-  let base64Prefix = `data:${contentType};base64,`
-  let base64Data = base64Prefix + bufferData.toString('base64')
+  const suffix = contentType?.split('/')[1] || 'mp4'
+  const base64Prefix = `data:${contentType};base64,`
+  const base64Data = base64Prefix + bufferData.toString('base64')
 
   // base64 模式：直接返回 base64（注意：视频 base64 可能非常长）
   if (videoMode === 'base64' || useBase64Mode) {
@@ -232,7 +232,7 @@ export const getVideoUrl = async (
 
   // File 模式：下载到本地，返回 file:// URL
   if (videoMode === 'File') {
-    let fileUrl = await writeCacheFile(base64Data, config)
+    const fileUrl = await writeCacheFile(base64Data, config)
     return fileUrl
   }
 
@@ -240,7 +240,7 @@ export const getVideoUrl = async (
   if (videoMode === 'assets' && ctx.assets) {
     try {
       // 注意：大型视频的 base64 字符串可能很长，某些 assets 插件可能处理较慢
-      let assetUrl = await ctx.assets.upload(base64Data, `rss-video-${Date.now()}.${suffix}`)
+      const assetUrl = await ctx.assets.upload(base64Data, `rss-video-${Date.now()}.${suffix}`)
       debug(config, `视频 Assets 上传成功: ${assetUrl}`, 'assets', 'info')
       return assetUrl
     } catch (error) {
@@ -256,7 +256,7 @@ export const getVideoUrl = async (
 export const puppeteerToFile = async (ctx: Context, config: Config, puppeteer: string): Promise<string> => {
   // puppeteer.render() 返回 Element 字符串，格式如: <img src="data:image/png;base64,..."/> 或 <img src="https://..."/>
   // 提取 src 属性
-  let base64 = /(?<=src=").+?(?=")/.exec(puppeteer)?.[0]
+  const base64 = /(?<=src=").+?(?=")/.exec(puppeteer)?.[0]
   if (!base64) {
     debug(config, `puppeteer render 返回值格式异常: ${puppeteer}`, 'puppeteerToFile', 'error');
     return puppeteer;

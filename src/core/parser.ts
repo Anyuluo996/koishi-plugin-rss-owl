@@ -201,7 +201,7 @@ export async function getRssData(
       return rssItemList
     } else if (rssJson.feed) {
       // Atom
-      let rss = { channel: {} }
+      const rss = { channel: {} }
       let item = rssJson.feed.entry.map(i => ({
         ...i,
         title: parseContent(i.title),

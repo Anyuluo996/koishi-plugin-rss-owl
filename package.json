@@ -4,6 +4,7 @@
   "version": "5.3.4",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
+  "packageManager": "pnpm@10.12.1",
   "author": "Anyuluo <anyul@email.com>",
   "contributors": [],
   "repository": {
@@ -43,16 +44,27 @@
     "x2js": "^3.4.4"
   },
   "devDependencies": {
+    "@eslint/js": "^8.57.1",
     "@jest/globals": "^30.2.0",
     "@types/jest": "^30.0.0",
+    "eslint": "^9.39.4",
+    "globals": "^15.15.0",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.0"
   },
   "scripts": {
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "build": "tsc"
+    "test:ci": "jest --ci --reporters=default",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "lint:fix": "eslint src tests --fix"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

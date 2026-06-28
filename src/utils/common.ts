@@ -57,7 +57,7 @@ export const parseContent = (content: any, attr = undefined): string | undefined
   } else if (Object.prototype.toString.call(content) === '[object Object]') {
     return (Object.values(content) as any[]).reduce<string>((t: string, v: any) => {
       if (v && (typeof v == 'string' || v?.join)) {
-        let text = v?.join("") || v
+        const text = v?.join("") || v
         return (typeof text === 'string' && text.length > t.length) ? text : t
       } else { return t }
     }, '')
@@ -97,11 +97,11 @@ export const parseTemplateContent = (template: string, item: any): string => {
 
 // 快速URL解析函数
 export const parseQuickUrl = (url: string, rssHubUrl: string, quickList: any[]): string => {
-  let correntQuickObj = quickList.find(i => new RegExp(`^${i.prefix}:`).test(url))
+  const correntQuickObj = quickList.find(i => new RegExp(`^${i.prefix}:`).test(url))
   if (!correntQuickObj) return url
-  let routeMatch = url.match(new RegExp(`(?<=^${correntQuickObj.prefix}:).*`))
+  const routeMatch = url.match(new RegExp(`(?<=^${correntQuickObj.prefix}:).*`))
   if (!routeMatch) return url
-  let route = routeMatch[0]
+  const route = routeMatch[0]
 
   // 复用模块级 parseTemplateContent，避免内嵌重复实现
   const rUrl = parseTemplateContent(correntQuickObj.replace, { rsshub: rssHubUrl, route })
@@ -116,6 +116,6 @@ export const cleanContent = (htmlContent: string): string => {
   $('style').remove()
   $('img').remove()
   $('video').remove()
-  let plainText = $.text().replace(/\s+/g, ' ').trim()
+  const plainText = $.text().replace(/\s+/g, ' ').trim()
   return plainText
 }
