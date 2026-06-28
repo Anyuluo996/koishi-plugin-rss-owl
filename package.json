@@ -47,6 +47,7 @@
     "@eslint/js": "^8.57.1",
     "@jest/globals": "^30.2.0",
     "@types/jest": "^30.0.0",
+    "@types/node": "^26.0.1",
     "eslint": "^9.39.4",
     "globals": "^15.15.0",
     "jest": "^30.2.0",
