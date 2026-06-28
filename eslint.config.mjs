@@ -48,11 +48,11 @@ export default tseslint.config(
       '@typescript-eslint/no-require-imports': 'off',     // 项目有合法 require（ts-node 节点场景）
       'no-undef': 'off',                                   // TS 文件由 tsc 负责未定义检查，no-undef 对 Node globals 误报
       'no-useless-escape': 'off',                          // 正则转义风格偏好，误报多于真问题，逐处改正则风险大
+      '@typescript-eslint/no-non-null-assertion': 'off',   // ! 是 TS 合理特性（开发者确信非空时用）；强行改 24 处分散代码会引入行为变化（?. 静默返回 undefined 反而难查 bug），收益 < 风险
       'no-empty': ['error', { allowEmptyCatch: true }],
 
       // === 抓真问题 ===
       'no-unused-private-class-members': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
       'prefer-const': 'error',
       'no-var': 'error',
       'no-debugger': 'error',

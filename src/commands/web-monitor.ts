@@ -19,10 +19,6 @@ interface HtmlMonitorOptions {
   test?: boolean
 }
 
-interface AskCommandOptions {
-  test?: boolean
-}
-
 interface WatchCommandOptions {
   puppeteer?: boolean
   test?: boolean

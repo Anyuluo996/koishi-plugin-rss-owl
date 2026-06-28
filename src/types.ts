@@ -1,5 +1,3 @@
-import { Context } from 'koishi'
-
 // assets 服务类型声明
 declare module 'koishi' {
   interface Context {

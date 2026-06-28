@@ -5,7 +5,7 @@ import { parsePubDate } from '../utils/common'
 import { normalizeError } from '../utils/error-handler'
 import { getNextUpdateTime, normalizeSubscriptionArg, setNextUpdateTime } from '../utils/legacy-config'
 import { createDebugWithContext, debug } from '../utils/logger'
-import { formatArg, mixinArg } from './feeder-arg'
+import { mixinArg } from './feeder-arg'
 import {
   buildFeedLogContext,
   buildFinalMessage,
@@ -13,7 +13,6 @@ import {
   createFeedDebug,
   fetchRssItems,
   filterItems,
-  findRssItem,
   generateMessages,
   getLastContent,
 } from './feeder-runtime'

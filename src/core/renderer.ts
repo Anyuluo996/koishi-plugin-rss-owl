@@ -358,6 +358,6 @@ export async function renderHtml2Image(
     return imgData.map(i => h.image(i, 'image/png')).join("")
 
   } finally {
-    try { await page.close() } catch (e) { /* 忽略页面已关闭的错误 */ }
+    try { await page.close() } catch { /* 忽略页面已关闭的错误 */ }
   }
 }
