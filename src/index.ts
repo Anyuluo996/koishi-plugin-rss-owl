@@ -27,6 +27,7 @@ import {
 // Import core modules
 import { RssItemProcessor } from './core/item-processor'
 import { startFeeder, stopFeeder } from './core/feeder'
+import { SubscriptionStore } from './core/subscription-store'
 import { initMessageCache, disposeMessageCache } from './utils/message-cache'
 import { registerMessageCacheService } from './services/message-cache-service'
 import { NotificationQueueManager } from './core/notification-queue'
@@ -72,6 +73,9 @@ export function apply(ctx: Context, config: Config) {
   // Initialize notification queue manager
   const queueManager = new NotificationQueueManager(ctx, config)
 
+  // Initialize subscription repository (rssOwl 表的唯一封装)
+  const subscriptionStore = new SubscriptionStore(ctx)
+
   // Initialize message cache
   if (config.cache?.enabled) {
     initMessageCache(ctx, config, config.cache.maxSize || 100)
@@ -102,6 +106,7 @@ export function apply(ctx: Context, config: Config) {
   registerSubscriptionManagementCommands({
     ctx,
     config,
+    store: subscriptionStore,
     parsePubDate: commandRuntime.parsePubDate,
     parseQuickUrl: commandRuntime.parseQuickUrl,
     getRssData: commandRuntime.getRssData,
@@ -112,6 +117,7 @@ export function apply(ctx: Context, config: Config) {
   registerSubscriptionCreateCommand({
     ctx,
     config,
+    store: subscriptionStore,
     usage,
     quickList,
     parseQuickUrl: commandRuntime.parseQuickUrl,
@@ -126,6 +132,7 @@ export function apply(ctx: Context, config: Config) {
   registerWebMonitorCommands({
     ctx,
     config,
+    store: subscriptionStore,
     debug: commandRuntime.debug,
     mixinArg: commandRuntime.mixinArg,
     getRssData: commandRuntime.getRssData,
@@ -137,6 +144,7 @@ export function apply(ctx: Context, config: Config) {
   registerSubscriptionEditCommand({
     ctx,
     config,
+    store: subscriptionStore,
   })
 
   registerManagementCommands({

@@ -1,5 +1,6 @@
 import { Context } from 'koishi'
 
+import { SubscriptionStore } from '../core/subscription-store'
 import type { Config } from '../types'
 import { getFriendlyErrorMessage, normalizeError } from '../utils/error-handler'
 import { debug } from '../utils/logger'
@@ -8,6 +9,7 @@ import { buildCommandLogContext, checkAuthority, extractSessionInfo } from './ut
 export interface SubscriptionCommandDeps {
   ctx: Context
   config: Config
+  store: SubscriptionStore
   parsePubDate: (pubDate: any) => Date
   parseQuickUrl: (url: string) => string
   getRssData: (url: string, arg: any) => Promise<any[]>
@@ -35,7 +37,7 @@ function registerListCommand(deps: SubscriptionCommandDeps): void {
     .example('rsso.list')
     .action(async ({ session }, id) => {
       const { guildId, platform } = extractSessionInfo(session as any)
-      const rssList = await getGuildSubscriptions(deps.ctx, platform, guildId)
+      const rssList = await getGuildSubscriptions(deps.store, platform, guildId)
 
       if (id === undefined) {
         if (rssList.length === 0) return '当前没有任何订阅'
@@ -84,15 +86,15 @@ function registerRemoveCommand(deps: SubscriptionCommandDeps): void {
       if (options.all) {
         const authorityCheck = checkAuthority(authority, deps.config.basic.authority, `权限不足！当前权限: ${authority}，需要权限: ${deps.config.basic.authority} 或以上`)
         if (!authorityCheck.success) return authorityCheck.message
-        await deps.ctx.database.remove('rssOwl', { platform, guildId })
+        await deps.store.removeAllByGuild(platform, guildId)
         return '✅ 已删除全部订阅'
       }
 
-      const rssList = await getGuildSubscriptions(deps.ctx, platform, guildId)
+      const rssList = await getGuildSubscriptions(deps.store, platform, guildId)
       const rssItem = getSubscriptionByIndex(rssList, id)
       if (!rssItem) return getSubscriptionNotFoundMessage(id, rssList.length)
 
-      await deps.ctx.database.remove('rssOwl', { id: rssItem.id })
+      await deps.store.remove(rssItem.id)
       return `✅ 已删除订阅: ${rssItem.title}`
     })
 }
@@ -109,7 +111,7 @@ function registerPullCommand(deps: SubscriptionCommandDeps): void {
     .example('rsso.pull 1')
     .action(async ({ session }, id) => {
       const { guildId, platform } = extractSessionInfo(session as any)
-      const rssList = await getGuildSubscriptions(deps.ctx, platform, guildId)
+      const rssList = await getGuildSubscriptions(deps.store, platform, guildId)
       const rssItem = getSubscriptionByIndex(rssList, id)
       if (!rssItem) return getSubscriptionNotFoundMessage(id, rssList.length)
 
@@ -162,7 +164,7 @@ function registerFollowCommand(deps: SubscriptionCommandDeps): void {
     .example('rsso.follow 1')
     .action(async ({ session, options }, id) => {
       const { guildId, platform, authorId, authority } = extractSessionInfo(session as any)
-      const rssList = await getGuildSubscriptions(deps.ctx, platform, guildId)
+      const rssList = await getGuildSubscriptions(deps.store, platform, guildId)
       const rssItem = getSubscriptionByIndex(rssList, id)
       if (!rssItem) return getSubscriptionNotFoundMessage(id, rssList.length)
 
@@ -172,19 +174,19 @@ function registerFollowCommand(deps: SubscriptionCommandDeps): void {
         if (!authorityCheck.success) return authorityCheck.message
         if (followers.includes('all')) return '💡 已经设置全员提醒'
         followers.push('all')
-        await deps.ctx.database.set('rssOwl', { id: rssItem.id }, { followers })
+        await deps.store.update(rssItem.id, { followers })
         return '✅ 已设置全员提醒'
       }
 
       if (followers.includes(authorId)) return '💡 已经关注过了'
       followers.push(authorId)
-      await deps.ctx.database.set('rssOwl', { id: rssItem.id }, { followers })
+      await deps.store.update(rssItem.id, { followers })
       return '✅ 关注成功'
     })
 }
 
-async function getGuildSubscriptions(ctx: Context, platform: string, guildId: string): Promise<any[]> {
-  return ctx.database.get('rssOwl', { platform, guildId })
+async function getGuildSubscriptions(store: SubscriptionStore, platform: string, guildId: string): Promise<any[]> {
+  return store.findByGuild(platform, guildId)
 }
 
 function getSubscriptionByIndex(rssList: any[], id: number): any | null {

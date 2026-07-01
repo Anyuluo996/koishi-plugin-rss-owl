@@ -1,5 +1,6 @@
 import { Context } from 'koishi'
 
+import { SubscriptionStore } from '../core/subscription-store'
 import type { Config, TemplateType } from '../types'
 import { checkAuthority, extractSessionInfo, parseTargets } from './utils'
 
@@ -15,6 +16,7 @@ interface EditCommandOptions {
 export interface SubscriptionEditCommandDeps {
   ctx: Context
   config: Config
+  store: SubscriptionStore
 }
 
 export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDeps): void {
@@ -52,7 +54,7 @@ export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDep
     .example('rsso.edit 1 -t "新标题"')
     .action(async ({ session, options }, id) => {
       const { guildId, platform, authority } = extractSessionInfo(session as any)
-      const rssList = await deps.ctx.database.get('rssOwl', { platform, guildId })
+      const rssList = await deps.store.findByGuild(platform, guildId)
       const listIndex = id - 1
 
       if (listIndex < 0 || listIndex >= rssList.length) {
@@ -82,7 +84,7 @@ export function registerSubscriptionEditCommand(deps: SubscriptionEditCommandDep
         return buildEditPreview(rssItem, id, options, parseResult.targets)
       }
 
-      return saveSubscriptionChanges(deps.ctx, rssItem, id, options, parseResult.targets)
+      return saveSubscriptionChanges(deps.store, rssItem, id, options, parseResult.targets)
     })
 }
 
@@ -107,7 +109,7 @@ function buildEditPreview(rssItem: any, id: number, options: EditCommandOptions,
   return testOutput
 }
 
-async function saveSubscriptionChanges(ctx: Context, rssItem: any, id: number, options: EditCommandOptions, parsedTargets: string[]): Promise<string> {
+async function saveSubscriptionChanges(store: SubscriptionStore, rssItem: any, id: number, options: EditCommandOptions, parsedTargets: string[]): Promise<string> {
   const updates: any = {}
 
   if (options.title) updates.title = options.title
@@ -131,7 +133,7 @@ async function saveSubscriptionChanges(ctx: Context, rssItem: any, id: number, o
         const [newPlatform, newGuildId] = parsedTargets[0].split(/[:：]/)
         updates.platform = newPlatform
         updates.guildId = newGuildId
-        await ctx.database.set('rssOwl', rssItem.id, updates)
+        await store.update(rssItem.id, updates)
 
         let result = `✅ 订阅已更新 [序号:${id} | ID:${rssItem.id}]\n\n`
         if (options.title) result += `标题: ${rssItem.title} → ${options.title}\n`
@@ -147,15 +149,11 @@ async function saveSubscriptionChanges(ctx: Context, rssItem: any, id: number, o
       result += `已创建 ${parsedTargets.length} 个推送目标:\n\n`
       result += `1. 原订阅 (本群): ${originalTarget}\n`
 
-      await ctx.database.set('rssOwl', rssItem.id, updates)
+      await store.update(rssItem.id, updates)
 
       for (let i = 0; i < parsedTargets.length; i++) {
         const [newPlatform, newGuildId] = parsedTargets[i].split(/[:：]/)
-        const existing = await ctx.database.get('rssOwl', {
-          platform: newPlatform,
-          guildId: newGuildId,
-          url: rssItem.url
-        })
+        const existing = await store.findByGuildAndUrl(newPlatform, newGuildId, rssItem.url)
 
         if (existing.length > 0) {
           result += `${i + 2}. ⚠️ ${newPlatform}:${newGuildId} (订阅已存在，已跳过)\n`
@@ -169,7 +167,7 @@ async function saveSubscriptionChanges(ctx: Context, rssItem: any, id: number, o
           guildId: newGuildId,
         }
 
-        const created = await ctx.database.create('rssOwl', newSubscription)
+        const created = await store.create(newSubscription)
         result += `${i + 2}. ✅ ${newPlatform}:${newGuildId} (新订阅ID: ${created.id})\n`
       }
 
@@ -179,7 +177,7 @@ async function saveSubscriptionChanges(ctx: Context, rssItem: any, id: number, o
       return result.trim()
     }
 
-    await ctx.database.set('rssOwl', rssItem.id, updates)
+    await store.update(rssItem.id, updates)
 
     let result = `✅ 订阅已更新 [序号:${id} | ID:${rssItem.id}]\n\n`
     if (options.title) result += `标题: ${rssItem.title} → ${options.title}\n`
