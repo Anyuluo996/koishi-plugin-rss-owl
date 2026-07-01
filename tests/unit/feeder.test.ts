@@ -675,6 +675,7 @@ describe('Feeder - 生产者逻辑', () => {
       const setIntervalSpy = jest.spyOn(global, 'setInterval')
         .mockReturnValueOnce({} as any)
         .mockReturnValueOnce({} as any)
+        .mockReturnValueOnce({} as any)
       const clearIntervalSpy = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined as any)
 
       mockCtx.database.get.mockResolvedValue([])
@@ -690,12 +691,14 @@ describe('Feeder - 生产者逻辑', () => {
 
       await Promise.resolve()
 
-      expect(setIntervalSpy).toHaveBeenCalledTimes(2)
+      // 三个定时器：feeder 轮询(600000)、队列消费(15000)、自动清理(3600000)
+      expect(setIntervalSpy).toHaveBeenCalledTimes(3)
       expect(setIntervalSpy.mock.calls[0][1]).toBe(600000)
       expect(setIntervalSpy.mock.calls[1][1]).toBe(15000)
+      expect(setIntervalSpy.mock.calls[2][1]).toBe(60 * 60 * 1000)
 
       stopFeeder(mockConfig)
-      expect(clearIntervalSpy).toHaveBeenCalledTimes(2)
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(3)
     })
   })
 })

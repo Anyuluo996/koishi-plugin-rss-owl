@@ -324,3 +324,15 @@ export function initMessageCache(ctx: Context, config: Config, maxSize: number =
 export function getMessageCache(): MessageCacheManager | null {
   return globalMessageCache
 }
+
+/**
+ * 销毁全局消息缓存管理器
+ *
+ * 必须在插件 dispose 时调用：MessageCacheManager 构造时持有了 ctx，
+ * 若热重载后仍复用旧实例，会对已 dispose 的 ctx 执行数据库操作而报错/静默丢失。
+ * 置 null 后，下次 initMessageCache 会用新 ctx 重建实例。
+ */
+export function disposeMessageCache(): void {
+  globalMessageCache = null
+  logger.info('消息缓存管理器已销毁')
+}

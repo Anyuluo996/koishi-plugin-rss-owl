@@ -257,4 +257,25 @@ export class NotificationQueueManager {
 
     return cleanupCount
   }
+
+  /**
+   * 自动清理：周期性删除过期的 SUCCESS / FAILED 任务。
+   *
+   * SUCCESS 用 cleanupHours，FAILED 用 7×cleanupHours（失败记录保留更久便于排查，
+   * 但仍需回收，否则永久堆积拖慢全表查询）。供 feeder 定时器调用。
+   */
+  async runAutomaticCleanup(): Promise<{ success: number; failed: number }> {
+    const success = await this.store.cleanupSuccessTasks(this.cleanupHours)
+    // FAILED 保留时长为 SUCCESS 的 7 倍（默认 7 天），兼顾排查与回收
+    const failed = await this.store.cleanupFailedTasks(this.cleanupHours * 7)
+
+    if (success > 0 || failed > 0) {
+      debug(this.config, `自动清理：${success} 个成功任务、${failed} 个失败任务`, 'queue', 'info', {
+        cleanupSuccess: success,
+        cleanupFailed: failed,
+      })
+    }
+
+    return { success, failed }
+  }
 }

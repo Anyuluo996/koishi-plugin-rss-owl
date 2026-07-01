@@ -62,7 +62,7 @@ export class NotificationQueueStore {
   }
 
   async getPendingTasks(): Promise<QueueTask[]> {
-    const now = new Date()
+    const now = Date.now()
     const pendingTasks = await this.ctx.database.get(
       RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'PENDING' },
@@ -76,12 +76,19 @@ export class NotificationQueueStore {
     ) as QueueTask[]
 
     const readyRetryTasks = retryTasks.filter(task =>
-      task.nextRetryTime && new Date(task.nextRetryTime) <= now,
+      task.nextRetryTime && new Date(task.nextRetryTime).getTime() <= now,
     )
 
-    return [...pendingTasks, ...readyRetryTasks]
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .slice(0, this.batchSize)
+    // PENDING 优先于 RETRY：避免一个持续高频失败的源因其 RETRY 任务 createdAt 较老
+    // 而长期占用 batchSize 槽位，把新订阅的新消息饿死（延迟数分钟才发）。
+    // 各组内部仍按 createdAt 升序（先入先出）。
+    const byCreatedAsc = (a: QueueTask, b: QueueTask) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+
+    return [
+      ...pendingTasks.sort(byCreatedAsc),
+      ...readyRetryTasks.sort(byCreatedAsc),
+    ].slice(0, this.batchSize)
   }
 
   async markTaskSuccess(taskId: number): Promise<void> {
@@ -124,10 +131,12 @@ export class NotificationQueueStore {
   }
 
   async recoverRetryTasksWithoutNextRetryTime(): Promise<number> {
+    // 不限制 limit：损坏的 RETRY 任务可能 > batchSize（老版本升级 / DB 手工修改），
+    // 若只修前 batchSize 条，剩余的会因 nextRetryTime 永远为空而既不重试也不失败，永久卡住。
+    // 本操作幂等（只修 nextRetryTime 为空的），可安全重复执行。
     const retryTasks = await this.ctx.database.get(
       RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'RETRY' },
-      { limit: this.batchSize },
     ) as QueueTask[]
 
     const invalidTasks = retryTasks.filter(task => !task.nextRetryTime)
@@ -177,6 +186,26 @@ export class NotificationQueueStore {
     const tasks = await this.ctx.database.get(
       RSS_NOTIFICATION_QUEUE_TABLE,
       { status: 'SUCCESS', updatedAt: { $lt: cutoffTime } },
+    ) as QueueTask[]
+
+    for (const task of tasks) {
+      await this.ctx.database.remove(RSS_NOTIFICATION_QUEUE_TABLE, { id: task.id })
+    }
+
+    return tasks.length
+  }
+
+  /**
+   * 清理旧的 FAILED 任务。
+   *
+   * 与 SUCCESS 对称：FAILED 任务此前只进不出（无清理命令、无定时器），
+   * 长期运行会无限堆积，拖慢 getStats / getPendingTasks 的全表查询。
+   */
+  async cleanupFailedTasks(olderThanHours: number = 168): Promise<number> {
+    const cutoffTime = new Date(Date.now() - olderThanHours * 60 * 60 * 1000)
+    const tasks = await this.ctx.database.get(
+      RSS_NOTIFICATION_QUEUE_TABLE,
+      { status: 'FAILED', updatedAt: { $lt: cutoffTime } },
     ) as QueueTask[]
 
     for (const task of tasks) {
