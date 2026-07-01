@@ -27,7 +27,7 @@ import {
 // Import core modules
 import { RssItemProcessor } from './core/item-processor'
 import { startFeeder, stopFeeder } from './core/feeder'
-import { initMessageCache } from './utils/message-cache'
+import { initMessageCache, disposeMessageCache } from './utils/message-cache'
 import { registerMessageCacheService } from './services/message-cache-service'
 import { NotificationQueueManager } from './core/notification-queue'
 
@@ -86,8 +86,12 @@ export function apply(ctx: Context, config: Config) {
 
   ctx.on('dispose', async () => {
     stopFeeder(config)
-    if (config.basic.imageMode === 'File') {
-      delCache(config)
+    // 销毁消息缓存单例：避免热重载后复用持有旧 ctx 的实例（P1-2）
+    if (config.cache?.enabled) {
+      disposeMessageCache()
+    }
+    if (config.basic?.imageMode === 'File') {
+      await delCache(config)
     }
   })
 

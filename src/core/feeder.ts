@@ -32,6 +32,13 @@ export { findRssItem, getLastContent } from './feeder-runtime'
 
 let interval: any = null
 let queueInterval: any = null
+let cleanupInterval: any = null
+
+// 重入栅栏：feeder() 单轮可能跑很久（订阅多 + 网络/tdl 慢），
+// 若耗时超过 refreshInterval，下一次 interval tick 会并发启动第二个 feeder()，
+// 导致同一消息被重复入队（addTask 的读-写去重非原子）→ 重复推送。
+// 仿照 NotificationQueueManager.processQueue 的 processing 标志，单轮串行。
+let feederRunning = false
 
 function shouldSkipByInterval(rssItem: any, arg: rssArg, originalArg: Record<string, any>): boolean {
   if (!rssItem.arg.interval) return false
@@ -69,7 +76,6 @@ function buildQueueUid(item: any, config: Config): string {
  */
 export async function feeder(deps: FeederDependencies, processor: RssItemProcessor) {
   const { ctx, config, $http, queueManager } = deps
-
   const rssList = await ctx.database.get('rssOwl', {})
   if (!rssList || rssList.length === 0) return
 
@@ -176,12 +182,30 @@ export async function feeder(deps: FeederDependencies, processor: RssItemProcess
 }
 
 export function startFeeder(ctx: Context, config: Config, $http: any, processor: RssItemProcessor, queueManager: NotificationQueueManager) {
+  // 幂等清理：若上一实例的 interval 尚未清理（未走 dispose 就再次 startFeeder），
+  // 先清掉旧句柄，避免 ghost 定时器泄漏。
+  if (interval) { clearInterval(interval); interval = null }
+  if (queueInterval) { clearInterval(queueInterval); queueInterval = null }
+  if (cleanupInterval) { clearInterval(cleanupInterval); cleanupInterval = null }
+
   const deps = { ctx, config, $http, queueManager }
   const lifecycleDebug = createDebugWithContext(config, { lifecycle: 'feeder' })
   const queueRuntimeConfig = getQueueRuntimeConfig(config)
 
+  // 受重入栅栏保护的 feeder 运行：避免上一轮未跑完时下一轮并发启动
+  const runFeederGuarded = () => {
+    if (feederRunning) {
+      debug(config, 'feeder 上一轮仍在运行，跳过本次 tick', 'feeder', 'details', { skipped: true })
+      return Promise.resolve()
+    }
+    feederRunning = true
+    return feeder(deps, processor).finally(() => {
+      feederRunning = false
+    })
+  }
+
   // Initial run
-  feeder(deps, processor).catch(err => {
+  runFeederGuarded().catch(err => {
     const normalizedError = normalizeError(err)
     lifecycleDebug(`Initial feeder run failed: ${normalizedError.message}`, 'feeder', 'error', {
       operation: 'initial-feeder-run',
@@ -195,7 +219,7 @@ export function startFeeder(ctx: Context, config: Config, $http: any, processor:
       const { delCache } = await import('../utils/media')
       await delCache(config)
     }
-    await feeder(deps, processor)
+    await runFeederGuarded()
   }, refreshInterval)
 
   // 启动消费者定时器（处理发送队列）
@@ -204,6 +228,20 @@ export function startFeeder(ctx: Context, config: Config, $http: any, processor:
   queueInterval = setInterval(async () => {
     await queueManager.processQueue()
   }, queueProcessInterval)
+
+  // 启动清理定时器：周期性删除过期的 SUCCESS/FAILED 任务，
+  // 防止 rss_notification_queue 表无限膨胀拖慢查询（此前只手动命令清理）。
+  // 每小时一次，cleanupHours 控制具体保留时长。
+  cleanupInterval = setInterval(async () => {
+    try {
+      await queueManager.runAutomaticCleanup()
+    } catch (err: any) {
+      const normalizedError = normalizeError(err)
+      lifecycleDebug(`自动清理失败: ${normalizedError.message}`, 'queue', 'error', {
+        operation: 'automatic-cleanup',
+      })
+    }
+  }, 60 * 60 * 1000)
 
   // 立即处理一次队列（启动时）
   queueManager.processQueue().catch(err => {
@@ -228,6 +266,12 @@ export function stopFeeder(config?: Config) {
     clearInterval(queueInterval)
     queueInterval = null
   }
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval)
+    cleanupInterval = null
+  }
+  // 复位栅栏：避免上一轮未跑完就 stopFeeder 后，下次 startFeeder 时栅栏卡死
+  feederRunning = false
 
   if (config) {
     const lifecycleDebug = createDebugWithContext(config, { lifecycle: 'feeder' })
