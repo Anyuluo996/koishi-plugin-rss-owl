@@ -368,6 +368,7 @@ koishi-plugin-rss-owl/
 | `ai.ts` | AI 功能（摘要、选择器生成） | `getAiSummary()`, `generateSelectorByAI()` |
 | `feeder.ts` | RSS 调度器、定时轮询 | `startFeeder()`, `stopFeeder()`, `mixinArg()` |
 | `item-processor.ts` | 条目处理、模板渲染 | `RssItemProcessor.parseRssItem()` |
+| `subscription-store.ts` | `rssOwl` 订阅表仓储封装 | `SubscriptionStore`（findByGuild / create / update / remove） |
 | `telegram-video-restore.ts` | Telegram "Video is too big" tdl 兜底恢复 | `restoreTelegramVideos()` |
 | `notification-queue.ts` | 发送队列 | `NotificationQueueManager` |
 | `parser.ts` | RSS/HTML/JSON 解析 | `getRssData()`, `parseRssData()` |
@@ -400,6 +401,10 @@ koishi-plugin-rss-owl/
 
 - `src/index.ts` 必须保持为**入口装配层**，禁止回填具体命令实现和复杂业务判断。
 - 命令共享依赖优先进入 `src/commands/runtime.ts`，不要在多个命令文件重复拼装相同 helper。
+- **命令层（`src/commands/`）禁止直接 `ctx.database.*` 访问业务表**：`rssOwl` 经 `SubscriptionStore`、
+  `rss_message_cache` 经 `MessageCacheManager`、`rss_notification_queue` 经 `NotificationQueueStore`。
+  命令层通过依赖注入拿到仓储实例，只复用核心函数，便于替换实现与单元测试。
+  （`feeder` 位于 `core/`，直接读写 `rssOwl` 属核心层对自身数据的合法访问，不强制走仓储。）
 - 模板解析、HTML 加载、图片资源回填优先收敛到 `src/core/item-processor.ts` / `src/core/renderer.ts`。
 - 代理配置统一复用 `src/utils/proxy.ts`，避免在 `ai.ts`、`search.ts` 等模块重复构造。
 
