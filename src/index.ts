@@ -36,9 +36,17 @@ import { NotificationQueueManager } from './core/notification-queue'
 import { setupDatabase } from './database'
 import { usage, quickList } from './constants'
 
-// Koishi 4.11+ 约定：必需服务用 `using` 声明（替代旧 `inject`）。
-// 可选服务（puppeteer/censor/assets/server/ffmpeg）不在此声明，代码内统一用可选链访问。
-export const using = ['database']
+// Koishi 4.11+ / cordis 3.x：服务声明用 inject 对象形式。
+// - required：缺失则插件不加载（database 必需）。
+// - optional：缺失仍加载，且抑制「property X is not registered」警告。
+//   关键：cordis 的 Context 是 Proxy，读取未声明的服务属性（哪怕仅判空
+//   `if (!ctx.server)` 或可选链 `ctx.server?.x()`）都会触发警告；只有声明进
+//   inject/using，Proxy 才会经 internal/inject 事件短路 checkInject。
+//   详见 @cordisjs/core index.cjs:271,284,866。
+export const inject = {
+  required: ['database'],
+  optional: ['assets', 'ffmpeg', 'puppeteer', 'server'],
+}
 
 export function apply(ctx: Context, config: Config) {
   // Setup database

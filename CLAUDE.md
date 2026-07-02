@@ -22,7 +22,7 @@
 - **项目名称**: koishi-plugin-rss-owl
 - **包名**: @anyul/koishi-plugin-rss
 - **技术栈**: TypeScript + Koishi 4.x + Node.js
-- **版本**: 5.3.10
+- **版本**: 5.3.11
 - **许可证**: MIT
 - **国际化定位**: **纯中文项目**。命令描述、配置 Schema、用户提示均为中文硬编码，不提供 i18n。如未来需要国际化，需另立 locales 专项。
 
@@ -53,9 +53,18 @@
 
 ### 插件入口约定
 
-- 入口导出 `name`、`using`、`apply(ctx, config)` 三件套。
-- **必需服务**用 `export const using = ['database']` 声明（Koishi 4.11+，替代旧 `inject`）。
-- **可选服务**（puppeteer/censor/assets/server/ffmpeg）**不**在 `using` 中声明，代码内统一用可选链访问（`ctx.puppeteer?.render()`），缺失时优雅降级。
+- 入口导出 `name`、`inject`、`apply(ctx, config)` 三件套。
+- **服务声明统一用 `export const inject` 对象形式**（cordis 3.x / Koishi 4.11+）：
+
+```typescript
+export const inject = {
+  required: ['database'],                              // 缺失则插件不加载
+  optional: ['assets', 'ffmpeg', 'puppeteer', 'server'], // 缺失仍加载，且抑制警告
+}
+```
+
+- **为什么可选服务也必须声明**：cordis 的 `Context` 是 `Proxy`，任何对未注册服务属性的**读取**——哪怕仅判空 `if (!ctx.server)` 或可选链 `ctx.server?.x()`——都会触发 `property X is not registered` 警告。只有声明进 `inject`/`using`，Proxy 才经 `internal/inject` 事件短路 `checkInject`，不再报警（详见 `@cordisjs/core` index.cjs:271,284,866）。
+- **可选链仍要保留**：声明 `optional` 只抑制警告，不保证服务存在；运行期访问方法体仍需 `ctx.puppeteer?.render()`，缺失时优雅降级。
 - 生命周期：`ctx.on('ready', ...)` 启动后台任务，`ctx.on('dispose', ...)` 清理定时器/监听，**必须支持热重载**。
 
 ### 数据库类型约定（重要）
@@ -83,12 +92,12 @@ const list = await ctx.database.get('rssOwl', { platform, guildId })
 
 | 服务 | 注入方式 | 本项目用法 | 缺失时行为 |
 |------|---------|-----------|-----------|
-| database | `using: ['database']`（必需） | `ctx.model.extend` / `ctx.database.*` | 插件不加载 |
-| puppeteer | 可选 | `ctx.puppeteer?.render/page` | 降级为纯文本/视频过滤 |
-| censor | 可选 | `ctx.censor?.()` | 跳过内容审查 |
-| assets | 可选 | `ctx.assets?.upload()` | 图片走 base64/File |
-| ffmpeg | 可选 | `ctx.ffmpeg?.executable` | Telegram 大视频压缩不可用 |
-| server | 可选 | `ctx.server?.get/post` | 消息缓存 HTTP 服务不注册 |
+| database | `inject.required`（必需） | `ctx.model.extend` / `ctx.database.*` | 插件不加载 |
+| puppeteer | `inject.optional` | `ctx.puppeteer?.render/page` | 降级为纯文本/视频过滤 |
+| assets | `inject.optional` | `ctx.assets?.upload()` | 图片走 base64/File |
+| ffmpeg | `inject.optional` | `ctx.ffmpeg?.executable` | Telegram 大视频压缩不可用 |
+| server | `inject.optional` | `ctx.server?.get/post` | 消息缓存 HTTP 服务不注册 |
+| censor | 不声明（非 ctx 服务） | 消息体内 `<censor>` 标签，由 `@koishijs/censor` 在发送期转换 | 不审查 |
 
 ### 日志约定
 
