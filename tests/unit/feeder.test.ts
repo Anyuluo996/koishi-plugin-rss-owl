@@ -494,7 +494,8 @@ describe('Feeder - 生产者逻辑', () => {
       expect(mockCtx.database.set).toHaveBeenCalled()
       const updateCall = mockCtx.database.set.mock.calls[0]
       expect(updateCall[2].arg.nextUpdateTime).toBeGreaterThan(now)
-      expect(updateCall[2].arg.nextUpdataTime).toBeGreaterThan(now)
+      // 收敛后只写规范名 nextUpdateTime，不再回写旧拼写 nextUpdataTime
+      expect(updateCall[2].arg.nextUpdataTime).toBeUndefined()
     })
 
     it('应该处理 RSS 抓取失败', async () => {

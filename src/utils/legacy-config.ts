@@ -7,8 +7,12 @@ type ArgAliasShape = Partial<rssArg> & Record<string, any>
 
 export function normalizeBasicConfig<T extends BasicAliasShape | undefined>(basic?: T): T & BasicAliasShape {
   const normalized = { ...(basic || {}) } as BasicAliasShape
-  const mergeVideo = normalized.mergeVideo ?? normalized.margeVideo
-  const resendUpdatedContent = normalized.resendUpdatedContent ?? normalized.resendUpdataContent
+  // 读取归一：typo（旧拼写）优先。理由——schema 会为声明的规范名注入默认值
+  // （如 mergeVideo:false），若用 `correct ?? typo` 会被默认值短路，吞掉老用户
+  // 真实意图（margeVideo:true）。typo 存在则必来自历史用户数据，应优先采纳。
+  // 写入仍双写两个键（保持运行时兼容，下游直接读 margeVideo 仍可拿到值）。
+  const mergeVideo = normalized.margeVideo ?? normalized.mergeVideo
+  const resendUpdatedContent = normalized.resendUpdataContent ?? normalized.resendUpdatedContent
 
   if (mergeVideo !== undefined) {
     normalized.mergeVideo = mergeVideo
@@ -56,11 +60,13 @@ export function getNextUpdateTime(arg?: ArgAliasShape): number | undefined {
 
 export function setNextUpdateTime(target: ArgAliasShape, nextUpdateTime?: number): void {
   if (nextUpdateTime === undefined) {
+    // 清理时双删：删规范名的同时顺手清掉残留的旧拼写名（老数据可能仍有）
     delete target.nextUpdateTime
     delete target.nextUpdataTime
     return
   }
 
+  // 只写规范名：不再回写 nextUpdataTime，让旧拼写从数据中自然淘汰。
+  // 读取侧 getNextUpdateTime 已用 `nextUpdateTime ?? nextUpdataTime` 兜底老数据。
   target.nextUpdateTime = nextUpdateTime
-  target.nextUpdataTime = nextUpdateTime
 }
