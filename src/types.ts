@@ -114,6 +114,7 @@ export interface CustomTemplateItem {
 export interface BasicConfig {
   usePoster: boolean;
   mergeVideo?: boolean
+  /** @deprecated 拼写错误，请使用 mergeVideo。运行时仍兼容读取。 */
   margeVideo?: boolean
   defaultTemplate?: TemplateType
   timeout?: number
@@ -123,6 +124,7 @@ export interface BasicConfig {
   firstLoad?: boolean
   urlDeduplication?: boolean
   resendUpdatedContent?: 'disable'|'latest'|'all'
+  /** @deprecated 拼写错误，请使用 resendUpdatedContent。运行时仍兼容读取。 */
   resendUpdataContent?: 'disable'|'latest'|'all'
   imageMode?: 'base64' | 'File' | 'assets'
   videoMode?: 'filter'|'href'|'base64' | 'File' | 'assets'
@@ -219,10 +221,13 @@ export interface rssArg {
   split?:number
 
   nextUpdateTime?: number
+  /** @deprecated 拼写错误，请使用 nextUpdateTime。运行时仍兼容读取。 */
   nextUpdataTime?: number
   mergeVideo?: boolean
+  /** @deprecated 拼写错误，请使用 mergeVideo。运行时仍兼容读取。 */
   margeVideo?: boolean
   resendUpdatedContent?: 'disable'|'latest'|'all'
+  /** @deprecated 拼写错误，请使用 resendUpdatedContent。运行时仍兼容读取。 */
   resendUpdataContent?: 'disable'|'latest'|'all'
 
   // HTML 监控相关字段
