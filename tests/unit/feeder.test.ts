@@ -4,6 +4,7 @@
 
 import { afterEach, describe, it, expect, beforeEach, jest } from '@jest/globals'
 import { feeder, mixinArg, formatArg, findRssItem, getLastContent, startFeeder, stopFeeder } from '../../src/core/feeder'
+import { buildFinalMessage } from '../../src/core/feeder-runtime'
 import { getRssData } from '../../src/core/parser'
 import { Config, rssArg } from '../../src/types'
 import { RssItemProcessor } from '../../src/core/item-processor'
@@ -518,6 +519,43 @@ describe('Feeder - 生产者逻辑', () => {
 
       // 应该继续处理，不抛出异常
       expect(mockQueueManager.addTask).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('buildFinalMessage - 图片数量阈值合并转发', () => {
+    // 关闭视频与 merge 规则干扰，隔离图片阈值分支
+    const noMergeConfig: Config = {
+      ...mockConfig,
+      basic: { ...mockConfig.basic, merge: '不合并', mergeVideo: false },
+    } as Config
+    const noMergeArg: rssArg = { merge: false }
+    const rssItem = { author: 'bot-1' }
+
+    it('图片总数达到 4 张时应合并转发', () => {
+      const messageList = [
+        '<p>item1</p><img src="a"/><img src="b"/>',
+        '<p>item2</p><img src="c"/><img src="d"/>',
+      ]
+      const message = buildFinalMessage(noMergeConfig, messageList, rssItem, noMergeArg)
+      expect(message).toContain('<message forward>')
+      expect(message).toContain('<author id="bot-1"/>')
+      // 每条 item 作为独立子消息
+      expect(message.match(/<message>/g)?.length).toBe(2)
+    })
+
+    it('图片总数不足 4 张时不应合并转发', () => {
+      const messageList = [
+        '<p>item1</p><img src="a"/><img src="b"/>',
+        '<p>item2</p><img src="c"/>',
+      ]
+      const message = buildFinalMessage(noMergeConfig, messageList, rssItem, noMergeArg)
+      expect(message).not.toContain('<message forward>')
+    })
+
+    it('单条 item 含 4 张图片时也应合并转发', () => {
+      const messageList = ['<img src="a"/><img src="b"/><img src="c"/><img src="d"/>']
+      const message = buildFinalMessage(noMergeConfig, messageList, rssItem, noMergeArg)
+      expect(message).toContain('<message forward>')
     })
   })
 

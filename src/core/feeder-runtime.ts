@@ -257,8 +257,12 @@ export function buildFinalMessage(config: Config, messageList: string[], rssItem
   let message = ''
   const shouldMerge = arg.merge === true || config.basic?.merge === '一直合并' || (config.basic?.merge === '有多条更新时合并' && messageList.length > 1)
   const hasVideo = shouldMergeVideo(config) && messageList.some(msg => /<video/.test(msg))
+  // 图片数量达到阈值（4 张）时合并转发，规避部分适配器对大量图片的限制
+  const MERGE_IMAGE_THRESHOLD = 4
+  const imageCount = messageList.reduce((sum, msg) => sum + (msg.match(/<img\b/gi)?.length || 0), 0)
+  const shouldMergeByImage = imageCount >= MERGE_IMAGE_THRESHOLD
 
-  if (shouldMerge || hasVideo) {
+  if (shouldMerge || hasVideo || shouldMergeByImage) {
     message = `<message forward><author id="${rssItem.author}"/>${messageList.map(msg => `<message>${msg}</message>`).join('')}</message>`
   } else {
     message = messageList.join('')
