@@ -133,6 +133,7 @@ export interface BasicConfig {
   replaceDir?: string
   maxImageSize?: number  // 图片最大文件大小（MB）
   maxVideoSize?: number  // 视频最大文件大小（MB）
+  forwardBatchSize?: number  // 合并转发分批大小：单个转发消息内最多子消息数，超出则拆分多次发送
 
   authority:number
   advancedAuthority:number

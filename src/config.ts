@@ -71,6 +71,7 @@ export const Config: Schema<ConfigType> = Schema.object({
     replaceDir: Schema.string().description('缓存替换路径，仅在使用docker部署时需要设置').default(''),
     maxImageSize: Schema.number().description('图片最大文件大小限制（MB），超出限制的图片将被跳过').default(30),
     maxVideoSize: Schema.number().description('视频最大文件大小限制（MB），超出限制的视频将被跳过').default(30),
+    forwardBatchSize: Schema.number().min(1).description('合并转发分批大小：单个转发消息内最多包含的子消息数量，超出则拆分为多次发送，避免 OneBot 端下载大量媒体超时').default(4),
   }).description('基础设置'),
   template: Schema.object({
     bodyWidth: Schema.number().description('puppeteer图片的宽度(px)，较低的值可能导致排版错误，仅在非custom的模板生效').default(600),

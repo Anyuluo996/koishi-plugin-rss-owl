@@ -340,4 +340,45 @@ describe('NotificationQueueManager', () => {
 
     expect(queueManager.isProcessing()).toBe(false)
   })
+
+  it('合并转发子消息过多时按 forwardBatchSize 分多次 broadcast', async () => {
+    // 构造含 9 个子节点的大 forward + 外部 at 提及
+    const children = Array.from({ length: 9 }, (_, i) => `<message>子${i + 1}</message>`).join('')
+    const bigForward = `<message forward><author id="bot-1"/>${children}</message><message><at id="123"/></message>`
+
+    const { ctx, tasks } = createMockContext([
+      createTask({ id: 111, status: 'PENDING', content: { message: bigForward } }),
+    ])
+    // 配置 forwardBatchSize=4 → 应拆成 3 批 (4+4+1)
+    const config = createConfig()
+    config.basic!.forwardBatchSize = 4
+    const queueManager = new NotificationQueueManager(ctx, config)
+
+    await queueManager.processQueue()
+
+    // broadcast 被调用 3 次
+    expect(ctx.broadcast).toHaveBeenCalledTimes(3)
+    // 每次第二个参数都是合法的小 forward
+    for (const call of ctx.broadcast.mock.calls) {
+      const content = call[1] as string
+      expect(content).toMatch(/^<message forward>/)
+    }
+    // 最后一批尾部带外部 at 提及
+    const lastCall = ctx.broadcast.mock.calls[ctx.broadcast.mock.calls.length - 1]
+    expect(lastCall[1]).toContain('<at id="123"/>')
+    // 任务成功
+    expect(tasks[0].status).toBe('SUCCESS')
+  })
+
+  it('非 forward 消息不受 forwardBatchSize 影响（仍单次 broadcast）', async () => {
+    const { ctx } = createMockContext([createTask({ id: 121, status: 'PENDING' })])
+    const config = createConfig()
+    config.basic!.forwardBatchSize = 4
+    const queueManager = new NotificationQueueManager(ctx, config)
+
+    await queueManager.processQueue()
+
+    expect(ctx.broadcast).toHaveBeenCalledTimes(1)
+    expect(ctx.broadcast).toHaveBeenCalledWith(['onebot:guild-1'], 'test message')
+  })
 })
